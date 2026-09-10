@@ -1,0 +1,19 @@
+{
+  "schema": "os-shell.manifest/0.1",
+  "appId": "shell-demo-notes",
+  "name": "Shell Demo Notes",
+  "version": "1.3.0",
+  "origin": "http://127.0.0.1:5185",
+  "class": "compatible",
+  "embed": "allow",
+  "launch": "/",
+  "requested": ["media.camera"],
+  "requestedCapabilities": ["camera"],
+  "intentHandlers": [
+    { "intent": "view", "contextTypes": ["text"], "route": "/" },
+    { "intent": "edit", "contextTypes": ["text"], "route": "/" },
+    { "intent": "share", "contextTypes": ["text"], "route": "/" },
+    { "intent": "open", "contextTypes": ["text"], "route": "/" }
+  ],
+  "publisher": "External developer example"
+}

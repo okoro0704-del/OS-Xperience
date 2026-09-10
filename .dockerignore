@@ -1,0 +1,15 @@
+node_modules
+dist
+.vite
+.git
+.github
+android
+*.local
+.DS_Store
+apps/web/.env.production
+apps/web/.env.staging
+*.jks
+*.keystore
+android/keystore.properties
+android/local.properties
+agent-transcripts

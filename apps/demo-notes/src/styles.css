@@ -1,0 +1,98 @@
+:root {
+  color-scheme: light;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  line-height: 1.45;
+  color: #1a1f16;
+  background: #f4f1e8;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.eyebrow {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+  color: #5c6554;
+}
+
+h1 {
+  margin: 4px 0 8px;
+  font-size: 28px;
+}
+
+.muted {
+  color: #5c6554;
+}
+
+.panel {
+  background: #fffdf8;
+  border: 1px solid #d9d2c3;
+  border-radius: 12px;
+  padding: 16px;
+  margin-top: 14px;
+}
+
+.grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+}
+
+.btn {
+  appearance: none;
+  border: 1px solid #2f3a28;
+  background: #2f3a28;
+  color: #fffdf8;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  margin-right: 8px;
+  margin-top: 8px;
+}
+
+.btn.ghost {
+  background: transparent;
+  color: #2f3a28;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+video {
+  width: 100%;
+  max-width: 420px;
+  background: #111;
+  border-radius: 8px;
+  margin-top: 10px;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #efe9da;
+  border-radius: 8px;
+  padding: 10px;
+  font-size: 12px;
+}
+
+.chip {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: #e5ecda;
+  font-size: 12px;
+}

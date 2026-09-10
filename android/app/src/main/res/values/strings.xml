@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">OS Shell</string>
+    <string name="title_activity_main">OS Shell</string>
+    <string name="package_name">com.digiconomy.osshell</string>
+    <string name="custom_url_scheme">com.digiconomy.osshell</string>
+</resources>

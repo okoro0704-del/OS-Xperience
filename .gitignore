@@ -1,0 +1,17 @@
+node_modules
+dist
+.vite
+*.local
+.DS_Store
+apps/web/.env.production
+apps/web/.env.staging
+android/.gradle
+android/app/build
+android/build
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore
+.idea
+.capacitor
+.railway
