@@ -86,7 +86,28 @@ Rejected class names include MarketplaceBackend, AppStoreBackend, AppInstallatio
 
 Canonical six primitives only: trust-id, elfcom, sovereign-drive, platform-jobs, master-distributor, fundzman.
 
-## Verification
+## Railway (web host)
+
+Live production Shell:
+
+- URL: https://os-shell-production.up.railway.app
+- Project: `OS-Xperience`
+- Service: `os-shell`
+- GitHub: https://github.com/okoro0704-del/OS-Xperience
+
+Service variables (build-time for Vite):
+
+| Variable | Purpose |
+| --- | --- |
+| `VITE_SHELL_MODE` | `production` |
+| `VITE_SHELL_ORIGINS` | Railway public URL + Capacitor hosts |
+| `VITE_MYBRANDOS_ORIGINS` | Trusted mybrandOS HTTPS origins |
+| `VITE_LIFEOS_ORIGINS` | Trusted LifeOS HTTPS origins |
+| `VITE_COMPATIBLE_ORIGINS` | Optional third-party origins |
+| `PORT` | `8080` (nginx listen) |
+
+Replace `*.digiconomy.example` LifeOS / mybrandOS origins with real production hosts when ready, then redeploy.
+
 
 ```bash
 npm test
