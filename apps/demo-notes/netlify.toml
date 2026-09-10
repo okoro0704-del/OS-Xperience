@@ -1,0 +1,12 @@
+# Used when Netlify "Base directory" / package path is apps/demo-notes.
+[build]
+  command = "cd ../.. && npm ci && npm run build -w @osshell/contract && npm run build -w @osshell/sdk && npm run build -w @osshell/demo-notes"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
