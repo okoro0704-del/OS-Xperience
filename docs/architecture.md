@@ -7,3 +7,9 @@ OS Shell remains the operating and mediation layer: it determines which applicat
 LifeOS and mybrandOS remain their own product domains. Trust ID may provide a future safe identity assertion; it does not replace application accounts or supply biometrics. ElfCom remains messaging infrastructure; FundzMan remains financial infrastructure; Sovereign Drive remains storage infrastructure. Xperience declares participation only.
 
 The monorepo additions are `apps/xperience-console`, `api`, `packages/xperience-contract`, and `packages/xperience-sdk`. Domain logic lives in the API, transport-neutral wire contracts in the shared package, and the console is a separate React/Vite surface.
+
+## Persistence and identity
+
+`api/prisma/schema.prisma` and its initial SQL migration define PostgreSQL durable records. `ApplicationRepository` is the persistence seam: `PrismaApplicationRepository` is for configured production infrastructure, while the memory implementation is test-only. The API must not be deployed without a database client and `DATABASE_URL`.
+
+Authentication is a provider boundary. Production resolves through the Trust ID-compatible provider and fails closed until that provider is connected. The development adapter is available only with both `NODE_ENV=development` and `XPERIENCE_DEV_AUTH=true`; it is not an identity system and never proves application control.

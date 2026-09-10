@@ -1,0 +1,8 @@
+import { safeHttpsUrl, type EvidenceType } from "@digiconomy/xperience-contract";
+export type VerificationStatus="PENDING"|"VERIFIED"|"FAILED"|"UNAVAILABLE";
+export interface VerificationEvidenceInput { type:EvidenceType; locator:string; applicationOrigin:string; }
+export interface VerificationAdapter { type:EvidenceType; verify(input:VerificationEvidenceInput):Promise<{status:VerificationStatus; detail:string}>; }
+/** Network adapters intentionally return unavailable until a hardened outbound worker is configured. */
+class UnavailableAdapter implements VerificationAdapter { constructor(readonly type:EvidenceType){} async verify(input:VerificationEvidenceInput){ if(!safeVerificationUrl(input.locator)) return {status:"FAILED" as const,detail:"Unsafe verification locator."}; return {status:"UNAVAILABLE" as const,detail:"Verification provider is not connected."}; } }
+export class VerificationService { private adapters=new Map<EvidenceType,VerificationAdapter>(); constructor(adapters:VerificationAdapter[]=["DOMAIN","WELL_KNOWN_ENDPOINT","GITHUB","DEPLOYMENT_PROVIDER","XPERIENCE_ENDPOINT"].map(type=>new UnavailableAdapter(type as EvidenceType))){adapters.forEach(a=>this.adapters.set(a.type,a));} verify(input:VerificationEvidenceInput){return this.adapters.get(input.type)?.verify(input)??Promise.resolve({status:"UNAVAILABLE" as const,detail:"No adapter configured."});} }
+export function safeVerificationUrl(value:string):boolean { if(!safeHttpsUrl(value))return false; try {const u=new URL(value);const h=u.hostname.toLowerCase();return !h.endsWith(".local")&&!/^169\.254\./.test(h)&&!/^0\./.test(h)&&!/^fc|^fd/i.test(h);}catch{return false;} }
