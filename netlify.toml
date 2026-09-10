@@ -1,5 +1,4 @@
-# Netlify site for Shell Demo Notes (compatible third-party demo app).
-# Base directory must stay the monorepo root so workspaces resolve.
+# Shell Demo Notes — Netlify (monorepo root as base directory)
 [build]
   command = "npm ci && npm run build -w @osshell/contract && npm run build -w @osshell/sdk && npm run build -w @osshell/demo-notes"
   publish = "apps/demo-notes/dist"
