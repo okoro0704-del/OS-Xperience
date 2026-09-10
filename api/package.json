@@ -1,0 +1,3 @@
+{
+  "name": "@digiconomy/xperience-api", "version": "0.1.0", "private": true, "type": "module", "scripts": { "build": "tsc", "typecheck": "tsc --noEmit", "dev": "tsx src/server.ts" }, "dependencies": { "@digiconomy/xperience-contract": "*" }
+}

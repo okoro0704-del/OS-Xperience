@@ -1,0 +1,14 @@
+generator client { provider = "prisma-client-js" }
+datasource db { provider = "postgresql"; url = env("DATABASE_URL") }
+enum ReviewState { DRAFT SUBMITTED UNDER_REVIEW CHANGES_REQUIRED APPROVED PUBLISHED SUSPENDED REVOKED }
+enum EvidenceType { DOMAIN WELL_KNOWN_ENDPOINT GITHUB DEPLOYMENT_PROVIDER XPERIENCE_ENDPOINT }
+model Developer { id String @id @default(cuid()) email String @unique identities DeveloperIdentity[] applications Application[] createdAt DateTime @default(now()) }
+model DeveloperIdentity { id String @id @default(cuid()) developerId String provider String subject String developer Developer @relation(fields:[developerId],references:[id]) @@unique([provider,subject]) }
+model Application { id String @id manifest Json state ReviewState @default(DRAFT) revision Int @default(1) developerId String developer Developer @relation(fields:[developerId],references:[id]) manifests ApplicationManifest[] evidence VerificationEvidence[] reviews Review[] publications Publication[] audit AuditEvent[] }
+model ApplicationManifest { id String @id @default(cuid()) applicationId String revision Int claim Json application Application @relation(fields:[applicationId],references:[id]) @@unique([applicationId,revision]) }
+model VerificationEvidence { id String @id @default(cuid()) applicationId String type EvidenceType locator String status String @default("PENDING") application Application @relation(fields:[applicationId],references:[id]) attempts VerificationAttempt[] }
+model VerificationAttempt { id String @id @default(cuid()) evidenceId String outcome String detail String? evidence VerificationEvidence @relation(fields:[evidenceId],references:[id]) createdAt DateTime @default(now()) }
+model Review { id String @id @default(cuid()) applicationId String reviewerId String state ReviewState note String? application Application @relation(fields:[applicationId],references:[id]) actions ReviewAction[] createdAt DateTime @default(now()) }
+model ReviewAction { id String @id @default(cuid()) reviewId String action String actorId String detail String? review Review @relation(fields:[reviewId],references:[id]) createdAt DateTime @default(now()) }
+model Publication { id String @id @default(cuid()) applicationId String status String application Application @relation(fields:[applicationId],references:[id]) createdAt DateTime @default(now()) }
+model AuditEvent { id String @id @default(cuid()) applicationId String? actorId String action String detail Json? application Application? @relation(fields:[applicationId],references:[id]) createdAt DateTime @default(now()) }
