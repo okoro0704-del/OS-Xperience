@@ -82,7 +82,7 @@ Honest states: `OFFLINE`, `UNAVAILABLE`, `TIMEOUT`, `UNKNOWN`. Never fake succes
 
 ## Architecture guard
 
-Rejected class names include MarketplaceBackend, AppStoreBackend, AppInstallationEngine, UniversalInstaller, ShellFilesystem, ShellNotificationBackend, plus prior AI/context/media engine bans.
+Rejected class names include marketplace/app-store backends, AppInstallationEngine, UniversalInstaller, ShellFilesystem, ShellNotificationBackend, plus prior AI/context/media engine bans.
 
 Canonical six primitives only: trust-id, elfcom, sovereign-drive, platform-jobs, master-distributor, fundzman.
 

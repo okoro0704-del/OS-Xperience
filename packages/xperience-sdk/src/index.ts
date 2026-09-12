@@ -6,7 +6,10 @@ import {
   type AuditEventView,
   type Capability,
   type CapabilityReviewState,
+  type DirectoryApplicationView,
   type EvidenceType,
+  type ExperienceMembershipView,
+  type OpenExperiencePayload,
   type ReviewState,
   type VerificationEvidenceView,
   type XperienceReady,
@@ -38,12 +41,13 @@ export function createXperienceClient(options: XperienceClientOptions) {
   };
 }
 
-export type DevActorHeader = `${"DEVELOPER" | "ADMIN"}:${string}`;
+export type DevActorHeader = `${"DEVELOPER" | "ADMIN" | "USER"}:${string}`;
 
 export interface XperienceApiClientOptions {
   baseUrl: string;
   actor: DevActorHeader;
   email?: string;
+  displayName?: string;
   fetchImpl?: typeof fetch;
 }
 
@@ -57,7 +61,7 @@ export class XperienceApiError extends Error {
   }
 }
 
-/** Typed HTTP client for developer/admin console surfaces. */
+/** Typed HTTP client for developer, admin, and consumer Experience surfaces. */
 export function createXperienceApiClient(options: XperienceApiClientOptions) {
   const fetchImpl = options.fetchImpl ?? fetch;
 
@@ -67,6 +71,7 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
       "X-Xperience-Dev-Actor": options.actor,
     };
     if (options.email) headers["X-Xperience-Dev-Email"] = options.email;
+    if (options.displayName) headers["X-Xperience-Dev-Name"] = options.displayName;
     const response = await fetchImpl(`${options.baseUrl}${path}`, {
       method,
       headers,
@@ -80,7 +85,8 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
   }
 
   return {
-    me: () => request<{ id: string; role: string; email?: string | null }>("GET", "/v1/me"),
+    me: () =>
+      request<{ id: string; role: string; email?: string | null; displayName?: string | null }>("GET", "/v1/me"),
     listApplications: () => request<{ applications: ApplicationView[] }>("GET", "/v1/applications"),
     registerApplication: (manifest: ApplicationManifestClaim) =>
       request<ApplicationView>("POST", "/v1/applications", { manifest }),
@@ -133,6 +139,34 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
       request<ApplicationView>("POST", `/v1/admin/applications/${encodeURIComponent(id)}/actions/${action}`, {
         reason,
       }),
+    listDirectory: (params?: { q?: string; category?: string }) => {
+      const search = new URLSearchParams();
+      if (params?.q) search.set("q", params.q);
+      if (params?.category) search.set("category", params.category);
+      const qs = search.toString();
+      return request<{ applications: DirectoryApplicationView[] }>(
+        "GET",
+        `/v1/directory${qs ? `?${qs}` : ""}`,
+      );
+    },
+    featuredDirectory: () =>
+      request<{ applications: DirectoryApplicationView[] }>("GET", "/v1/directory/featured"),
+    getDirectoryApplication: (id: string) =>
+      request<DirectoryApplicationView>("GET", `/v1/directory/${encodeURIComponent(id)}`),
+    listMyExperience: (filter?: string) => {
+      const qs = filter ? `?filter=${encodeURIComponent(filter)}` : "";
+      return request<{ experiences: ExperienceMembershipView[] }>("GET", `/v1/experience${qs}`);
+    },
+    startExperience: (id: string) =>
+      request<ExperienceMembershipView>("POST", `/v1/experience/${encodeURIComponent(id)}`),
+    stopExperience: (id: string) =>
+      request<{ removed: true }>("DELETE", `/v1/experience/${encodeURIComponent(id)}`),
+    pauseExperience: (id: string) =>
+      request<ExperienceMembershipView>("POST", `/v1/experience/${encodeURIComponent(id)}/pause`),
+    resumeExperience: (id: string) =>
+      request<ExperienceMembershipView>("POST", `/v1/experience/${encodeURIComponent(id)}/resume`),
+    openExperience: (id: string) =>
+      request<OpenExperiencePayload>("POST", `/v1/experience/${encodeURIComponent(id)}/open`),
   };
 }
 

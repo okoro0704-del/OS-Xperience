@@ -47,7 +47,11 @@ export function createRuntime(overrides?: {
 }
 
 function allowedOrigins(): Set<string> {
-  return new Set((process.env.XPERIENCE_CONSOLE_ORIGINS ?? "http://localhost:5174").split(",").map((s) => s.trim()));
+  return new Set(
+    (process.env.XPERIENCE_CONSOLE_ORIGINS ?? "http://localhost:5174,http://localhost:5175")
+      .split(",")
+      .map((s) => s.trim()),
+  );
 }
 
 async function readBody(req: IncomingMessage): Promise<unknown> {
@@ -106,8 +110,11 @@ export function createApiServer(runtime: ApiRuntime = createRuntime()): Server {
     res.setHeader("Vary", "Origin");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Content-Type", "application/json");
-    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type,X-Xperience-Dev-Actor,X-Xperience-Dev-Email");
+    res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+    res.setHeader(
+      "Access-Control-Allow-Headers",
+      "Content-Type,X-Xperience-Dev-Actor,X-Xperience-Dev-Email,X-Xperience-Dev-Name",
+    );
 
     if (req.method === "OPTIONS") {
       res.writeHead(204);
@@ -115,6 +122,7 @@ export function createApiServer(runtime: ApiRuntime = createRuntime()): Server {
     }
 
     const path = (req.url ?? "").split("?")[0] ?? "";
+    const query = new URL(req.url ?? "/", "http://localhost").searchParams;
     if (req.method === "GET" && path === "/health") {
       return send(res, 200, { status: "ok", service: "xperience-api" });
     }
@@ -123,7 +131,7 @@ export function createApiServer(runtime: ApiRuntime = createRuntime()): Server {
     if (!actor) return send(res, 401, { error: "authentication_required" });
 
     try {
-      await route(req, res, path, actor, service);
+      await route(req, res, path, query, actor, service);
     } catch (error) {
       if (error instanceof DomainError) return send(res, statusFor(error), { error: error.message, code: error.code });
       return send(res, 400, { error: error instanceof Error ? error.message : "invalid_request" });
@@ -135,15 +143,56 @@ async function route(
   req: IncomingMessage,
   res: ServerResponse,
   path: string,
+  query: URLSearchParams,
   actor: Actor,
   service: XperienceService,
 ): Promise<void> {
   if (req.method === "GET" && path === "/v1/me") {
     if (actor.role === "DEVELOPER") {
       const profile = await service.ensureDeveloperProfile(actor);
-      return send(res, 200, { ...profile, role: actor.role });
+      return send(res, 200, { ...profile, role: actor.role, displayName: actor.displayName ?? null });
     }
-    return send(res, 200, { id: actor.id, role: actor.role, email: actor.email ?? null });
+    return send(res, 200, {
+      id: actor.id,
+      role: actor.role,
+      email: actor.email ?? null,
+      displayName: actor.displayName ?? null,
+    });
+  }
+
+  if (req.method === "GET" && path === "/v1/directory") {
+    return send(res, 200, {
+      applications: await service.listDirectory(actor, {
+        q: query.get("q") ?? undefined,
+        category: query.get("category") ?? undefined,
+      }),
+    });
+  }
+
+  if (req.method === "GET" && path === "/v1/directory/featured") {
+    return send(res, 200, { applications: await service.listFeaturedDirectory(actor) });
+  }
+
+  const directoryDetail = path.match(/^\/v1\/directory\/([^/]+)$/);
+  if (directoryDetail && req.method === "GET") {
+    return send(res, 200, await service.getDirectoryApplication(actor, directoryDetail[1]));
+  }
+
+  if (req.method === "GET" && path === "/v1/experience") {
+    const filter = query.get("filter") as "All" | "Active" | "Paused" | "Recently Used" | null;
+    return send(res, 200, {
+      experiences: await service.listMyExperience(actor, filter ?? "All"),
+    });
+  }
+
+  const experienceMatch = path.match(/^\/v1\/experience\/([^/]+)(?:\/(pause|resume|open))?$/);
+  if (experienceMatch) {
+    const [, id, op] = experienceMatch;
+    if (req.method === "POST" && !op) return send(res, 201, await service.startExperience(actor, id));
+    if (req.method === "DELETE" && !op) return send(res, 200, await service.stopExperience(actor, id));
+    if (req.method === "POST" && op === "pause") return send(res, 200, await service.pauseExperience(actor, id));
+    if (req.method === "POST" && op === "resume") return send(res, 200, await service.resumeExperience(actor, id));
+    if (req.method === "POST" && op === "open") return send(res, 200, await service.openExperience(actor, id));
   }
 
   if (req.method === "GET" && path === "/v1/applications") {

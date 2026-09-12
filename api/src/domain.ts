@@ -1,25 +1,32 @@
 import {
   capabilityApprovalIsNotRuntimeAuthorization,
+  directoryCategory,
   reviewTransitionAllowed,
+  safeHttpsUrl,
   validateManifest,
   type ApplicationCapabilityView,
   type ApplicationView,
   type AuditEventView,
   type Capability,
   type CapabilityReviewState,
+  type DirectoryApplicationView,
   type EvidenceStatus,
   type EvidenceType,
+  type ExperienceMembershipStatus,
+  type ExperienceMembershipView,
+  type OpenExperiencePayload,
   type ReviewState,
   type VerificationEvidenceView,
 } from "@digiconomy/xperience-contract";
 import type { ApplicationRepository } from "./repository.js";
 import type { VerificationService } from "./verification.js";
 
-export type Role = "DEVELOPER" | "ADMIN";
+export type Role = "DEVELOPER" | "ADMIN" | "USER";
 export interface Actor {
   id: string;
   role: Role;
   email?: string;
+  displayName?: string;
 }
 
 export interface ApplicationRecord {
@@ -100,6 +107,34 @@ export class XperienceService {
 
   private requireAdmin(actor: Actor): void {
     if (actor.role !== "ADMIN") throw new DomainError("Admin role required.", "forbidden");
+  }
+
+  private requireUser(actor: Actor): void {
+    if (actor.role !== "USER") throw new DomainError("User role required.", "forbidden");
+  }
+
+  private toDirectoryView(
+    app: ApplicationRecord,
+    membership?: { status: "ACTIVE" | "PAUSED" } | null,
+  ): DirectoryApplicationView {
+    const published = app.state === "PUBLISHED";
+    let experienceStatus: ExperienceMembershipStatus | undefined;
+    if (membership) {
+      experienceStatus = published ? membership.status : "UNAVAILABLE";
+    }
+    return {
+      id: app.id,
+      name: app.manifest.name,
+      version: app.manifest.version,
+      origin: app.manifest.origin,
+      productionUrl: app.manifest.productionUrl,
+      xperienceUrl: app.manifest.xperienceUrl,
+      category: directoryCategory(app.manifest.capabilities),
+      capabilities: [...app.manifest.capabilities],
+      publicationState: published ? "PUBLISHED" : "NOT_PUBLISHED",
+      experienced: Boolean(membership),
+      experienceStatus,
+    };
   }
 
   async ensureDeveloperProfile(actor: Actor): Promise<{ id: string; email: string }> {
@@ -284,6 +319,171 @@ export class XperienceService {
   async listAudit(actor: Actor, applicationId?: string): Promise<AuditEventView[]> {
     this.requireAdmin(actor);
     return this.repository.listAudit(applicationId);
+  }
+
+  async listDirectory(
+    actor: Actor,
+    query?: { q?: string; category?: string },
+  ): Promise<DirectoryApplicationView[]> {
+    this.requireUser(actor);
+    const published = await this.repository.listByStates(["PUBLISHED"]);
+    const selections = await this.repository.listExperienceSelections(actor.id);
+    const byApp = new Map(selections.map((row) => [row.applicationId, row]));
+    const q = query?.q?.trim().toLowerCase();
+    const category = query?.category && query.category !== "All" ? query.category : undefined;
+    return published
+      .map((app) => this.toDirectoryView(app, byApp.get(app.id) ?? null))
+      .filter((app) => {
+        if (category && app.category !== category) return false;
+        if (!q) return true;
+        const hay = `${app.name} ${app.id} ${app.category} ${app.capabilities.join(" ")}`.toLowerCase();
+        return hay.includes(q);
+      });
+  }
+
+  async getDirectoryApplication(actor: Actor, id: string): Promise<DirectoryApplicationView> {
+    this.requireUser(actor);
+    const app = await this.repository.find(id);
+    if (!app || app.state !== "PUBLISHED") {
+      throw new DomainError("Published application not found.", "not_found");
+    }
+    const membership = await this.repository.findExperienceSelection(actor.id, id);
+    return this.toDirectoryView(app, membership);
+  }
+
+  async listMyExperience(
+    actor: Actor,
+    filter?: "All" | "Active" | "Paused" | "Recently Used",
+  ): Promise<ExperienceMembershipView[]> {
+    this.requireUser(actor);
+    const selections = await this.repository.listExperienceSelections(actor.id);
+    const items: ExperienceMembershipView[] = [];
+    for (const selection of selections) {
+      const app = await this.repository.find(selection.applicationId);
+      if (!app) continue;
+      const directory = this.toDirectoryView(app, selection);
+      // Directory presence is independent; membership may become UNAVAILABLE if unpublished.
+      const status: ExperienceMembershipStatus =
+        app.state === "PUBLISHED" ? selection.status : "UNAVAILABLE";
+      items.push({
+        applicationId: selection.applicationId,
+        status,
+        addedAt: selection.addedAt,
+        lastOpenedAt: selection.lastOpenedAt,
+        application: { ...directory, experienceStatus: status, experienced: true },
+      });
+    }
+    const filtered = items.filter((item) => {
+      if (!filter || filter === "All") return true;
+      if (filter === "Active") return item.status === "ACTIVE";
+      if (filter === "Paused") return item.status === "PAUSED";
+      if (filter === "Recently Used") return Boolean(item.lastOpenedAt);
+      return true;
+    });
+    if (filter === "Recently Used") {
+      filtered.sort((a, b) => (b.lastOpenedAt ?? "").localeCompare(a.lastOpenedAt ?? ""));
+    }
+    return filtered;
+  }
+
+  async startExperience(actor: Actor, applicationId: string): Promise<ExperienceMembershipView> {
+    this.requireUser(actor);
+    const app = await this.repository.find(applicationId);
+    if (!app || app.state !== "PUBLISHED") {
+      throw new DomainError("Only published applications can be experienced.", "forbidden");
+    }
+    const existing = await this.repository.findExperienceSelection(actor.id, applicationId);
+    if (existing) {
+      throw new DomainError("Application is already in your Experience.", "conflict");
+    }
+    const selection = await this.repository.upsertExperienceSelection({
+      participantId: actor.id,
+      applicationId,
+      status: "ACTIVE",
+      addedAt: new Date().toISOString(),
+    });
+    await this.log("EXPERIENCE_STARTED", actor, applicationId);
+    return {
+      applicationId,
+      status: "ACTIVE",
+      addedAt: selection.addedAt,
+      application: this.toDirectoryView(app, selection),
+    };
+  }
+
+  async pauseExperience(actor: Actor, applicationId: string): Promise<ExperienceMembershipView> {
+    return this.setExperienceStatus(actor, applicationId, "PAUSED");
+  }
+
+  async resumeExperience(actor: Actor, applicationId: string): Promise<ExperienceMembershipView> {
+    return this.setExperienceStatus(actor, applicationId, "ACTIVE");
+  }
+
+  private async setExperienceStatus(
+    actor: Actor,
+    applicationId: string,
+    status: "ACTIVE" | "PAUSED",
+  ): Promise<ExperienceMembershipView> {
+    this.requireUser(actor);
+    const selection = await this.repository.findExperienceSelection(actor.id, applicationId);
+    if (!selection) throw new DomainError("Application is not in your Experience.", "not_found");
+    const app = await this.repository.find(applicationId);
+    if (!app || app.state !== "PUBLISHED") {
+      throw new DomainError("Application is unavailable to experience.", "forbidden");
+    }
+    const updated = await this.repository.upsertExperienceSelection({ ...selection, status });
+    await this.log(status === "PAUSED" ? "EXPERIENCE_PAUSED" : "EXPERIENCE_RESUMED", actor, applicationId);
+    return {
+      applicationId,
+      status,
+      addedAt: updated.addedAt,
+      lastOpenedAt: updated.lastOpenedAt,
+      application: this.toDirectoryView(app, updated),
+    };
+  }
+
+  async stopExperience(actor: Actor, applicationId: string): Promise<{ removed: true }> {
+    this.requireUser(actor);
+    const selection = await this.repository.findExperienceSelection(actor.id, applicationId);
+    if (!selection) throw new DomainError("Application is not in your Experience.", "not_found");
+    await this.repository.deleteExperienceSelection(actor.id, applicationId);
+    await this.log("EXPERIENCE_STOPPED", actor, applicationId);
+    return { removed: true };
+  }
+
+  async openExperience(actor: Actor, applicationId: string): Promise<OpenExperiencePayload> {
+    this.requireUser(actor);
+    const selection = await this.repository.findExperienceSelection(actor.id, applicationId);
+    if (!selection) throw new DomainError("Application is not in your Experience.", "not_found");
+    const app = await this.repository.find(applicationId);
+    if (!app || app.state !== "PUBLISHED") {
+      throw new DomainError("Unpublished applications cannot be opened.", "forbidden");
+    }
+    if (selection.status === "PAUSED") {
+      throw new DomainError("Resume the experience before opening.", "invalid");
+    }
+    const embedUrl = app.manifest.productionUrl;
+    if (!safeHttpsUrl(embedUrl) || !safeHttpsUrl(app.manifest.origin)) {
+      throw new DomainError("Application origin failed safety validation.", "forbidden");
+    }
+    const updated = await this.repository.upsertExperienceSelection({
+      ...selection,
+      lastOpenedAt: new Date().toISOString(),
+    });
+    await this.log("EXPERIENCE_OPENED", actor, applicationId);
+    return {
+      applicationId: app.id,
+      name: app.manifest.name,
+      origin: app.manifest.origin,
+      embedUrl,
+      status: updated.status,
+    };
+  }
+
+  /** Featured / recently published directory ordering — not personalized recommendations. */
+  async listFeaturedDirectory(actor: Actor): Promise<DirectoryApplicationView[]> {
+    const apps = await this.listDirectory(actor);
+    return apps.slice(0, 12);
   }
 }
 

@@ -34,6 +34,10 @@ enum CapabilityReviewState {
  REJECTED
  REQUIRES_CHANGES
 }
+enum ExperienceMembershipStatus {
+ ACTIVE
+ PAUSED
+}
 model Developer {
  id String @id @default(cuid())
  email String @unique
@@ -63,7 +67,19 @@ model Application {
  reviews Review[]
  publications Publication[]
  audit AuditEvent[]
+ experienceSelections ExperienceSelection[]
  @@index([developerId, state])
+}
+model ExperienceSelection {
+ id String @id @default(cuid())
+ participantId String
+ applicationId String
+ status ExperienceMembershipStatus @default(ACTIVE)
+ addedAt DateTime @default(now())
+ lastOpenedAt DateTime?
+ application Application @relation(fields: [applicationId], references: [id])
+ @@unique([participantId, applicationId])
+ @@index([participantId, status])
 }
 model ApplicationManifest {
  id String @id @default(cuid())

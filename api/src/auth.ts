@@ -14,7 +14,7 @@ export class TrustIdAuthenticationProvider implements AuthenticationProvider {
 /**
  * Local-only adapter. Rejected unless NODE_ENV=development and XPERIENCE_DEV_AUTH=true.
  * Header: X-Xperience-Dev-Actor: ROLE:id
- * Optional: X-Xperience-Dev-Email
+ * Optional: X-Xperience-Dev-Email, X-Xperience-Dev-Name
  */
 export class DevelopmentAuthenticationProvider implements AuthenticationProvider {
   constructor(
@@ -28,10 +28,12 @@ export class DevelopmentAuthenticationProvider implements AuthenticationProvider
     const raw = headers["x-xperience-dev-actor"];
     if (typeof raw !== "string") return null;
     const [role, id] = raw.split(":");
-    if (!(role === "DEVELOPER" || role === "ADMIN") || !id) return null;
-    const emailHeader = headers["x-xperience-dev-email"];
+    if (!(role === "DEVELOPER" || role === "ADMIN" || role === "USER") || !id) return null;
     const actor: Actor = { id, role: role as Role };
+    const emailHeader = headers["x-xperience-dev-email"];
     if (typeof emailHeader === "string" && emailHeader) actor.email = emailHeader;
+    const nameHeader = headers["x-xperience-dev-name"];
+    if (typeof nameHeader === "string" && nameHeader) actor.displayName = nameHeader;
     return actor;
   }
 }

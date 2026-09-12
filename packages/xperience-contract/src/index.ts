@@ -144,13 +144,72 @@ export interface AuditEventView {
   id?: string;
   action: string;
   actorId: string;
-  actorType: "DEVELOPER" | "ADMIN";
+  actorType: "DEVELOPER" | "ADMIN" | "USER";
   applicationId?: string | null;
   at: string;
   previousState?: ReviewState;
   newState?: ReviewState;
   reason?: string;
   detail?: string;
+}
+
+/** User membership in My Experience — not Directory presence and not an install. */
+export const EXPERIENCE_MEMBERSHIP_STATUSES = ["ACTIVE", "PAUSED", "UNAVAILABLE"] as const;
+export type ExperienceMembershipStatus = (typeof EXPERIENCE_MEMBERSHIP_STATUSES)[number];
+
+export const DIRECTORY_CATEGORIES = [
+  "All",
+  "Finance",
+  "Lifestyle",
+  "Identity",
+  "Productivity",
+  "Device",
+  "Notifications",
+  "General",
+] as const;
+export type DirectoryCategory = (typeof DIRECTORY_CATEGORIES)[number];
+
+/** Deterministic category from declared capabilities — not a recommendation engine. */
+export function directoryCategory(capabilities: Capability[]): Exclude<DirectoryCategory, "All"> {
+  if (capabilities.includes("COMMERCE") || capabilities.includes("PAYMENTS")) return "Finance";
+  if (capabilities.includes("LIVE") || capabilities.includes("MESSAGING")) return "Lifestyle";
+  if (capabilities.includes("CAMERA") || capabilities.includes("DEVICE_BRIDGE")) return "Device";
+  if (capabilities.includes("FILES")) return "Productivity";
+  if (capabilities.includes("IDENTITY")) return "Identity";
+  if (capabilities.includes("NOTIFICATIONS")) return "Notifications";
+  return "General";
+}
+
+/** Public Directory listing — only published applications; no private review/admin fields. */
+export interface DirectoryApplicationView {
+  id: string;
+  name: string;
+  version: string;
+  origin: string;
+  productionUrl: string;
+  xperienceUrl: string;
+  category: Exclude<DirectoryCategory, "All">;
+  capabilities: Capability[];
+  publicationState: "PUBLISHED" | "NOT_PUBLISHED";
+  experienced: boolean;
+  experienceStatus?: ExperienceMembershipStatus;
+}
+
+export interface ExperienceMembershipView {
+  applicationId: string;
+  status: ExperienceMembershipStatus;
+  addedAt: string;
+  lastOpenedAt?: string;
+  application: DirectoryApplicationView;
+}
+
+/** Safe open payload for the in-app experience frame. */
+export interface OpenExperiencePayload {
+  applicationId: string;
+  name: string;
+  origin: string;
+  embedUrl: string;
+  status: ExperienceMembershipStatus;
 }
 
 export interface ApplicationView {

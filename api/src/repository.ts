@@ -12,6 +12,14 @@ import type {
 } from "@digiconomy/xperience-contract";
 import type { ApplicationRecord, AuditEvent } from "./domain.js";
 
+export interface ExperienceSelectionRecord {
+  participantId: string;
+  applicationId: string;
+  status: "ACTIVE" | "PAUSED";
+  addedAt: string;
+  lastOpenedAt?: string;
+}
+
 export interface ApplicationRepository {
   ensureDeveloper(input: { id: string; email: string }): Promise<{ id: string; email: string }>;
   create(app: ApplicationRecord): Promise<void>;
@@ -37,6 +45,13 @@ export interface ApplicationRepository {
   recordPublication(applicationId: string, status: string): Promise<void>;
   audit(event: AuditEvent): Promise<void>;
   listAudit(applicationId?: string): Promise<AuditEventView[]>;
+  listExperienceSelections(participantId: string): Promise<ExperienceSelectionRecord[]>;
+  findExperienceSelection(
+    participantId: string,
+    applicationId: string,
+  ): Promise<ExperienceSelectionRecord | null>;
+  upsertExperienceSelection(input: ExperienceSelectionRecord): Promise<ExperienceSelectionRecord>;
+  deleteExperienceSelection(participantId: string, applicationId: string): Promise<void>;
 }
 
 function asJson(value: ApplicationManifestClaim): Prisma.InputJsonValue {
@@ -62,7 +77,12 @@ export class MemoryApplicationRepository implements ApplicationRepository {
   private readonly apps = new Map<string, ApplicationRecord>();
   private readonly developers = new Map<string, { id: string; email: string }>();
   private readonly audits: AuditEventView[] = [];
+  private readonly selections = new Map<string, ExperienceSelectionRecord>();
   private evidenceSeq = 1;
+
+  private selectionKey(participantId: string, applicationId: string): string {
+    return `${participantId}::${applicationId}`;
+  }
 
   async ensureDeveloper(input: { id: string; email: string }): Promise<{ id: string; email: string }> {
     const existing = this.developers.get(input.id);
@@ -133,6 +153,30 @@ export class MemoryApplicationRepository implements ApplicationRepository {
     return this.audits
       .filter((event) => !applicationId || event.applicationId === applicationId)
       .map((event) => ({ ...event }));
+  }
+
+  async listExperienceSelections(participantId: string): Promise<ExperienceSelectionRecord[]> {
+    return [...this.selections.values()]
+      .filter((row) => row.participantId === participantId)
+      .map((row) => ({ ...row }));
+  }
+
+  async findExperienceSelection(
+    participantId: string,
+    applicationId: string,
+  ): Promise<ExperienceSelectionRecord | null> {
+    const row = this.selections.get(this.selectionKey(participantId, applicationId));
+    return row ? { ...row } : null;
+  }
+
+  async upsertExperienceSelection(input: ExperienceSelectionRecord): Promise<ExperienceSelectionRecord> {
+    const key = this.selectionKey(input.participantId, input.applicationId);
+    this.selections.set(key, { ...input });
+    return { ...input };
+  }
+
+  async deleteExperienceSelection(participantId: string, applicationId: string): Promise<void> {
+    this.selections.delete(this.selectionKey(participantId, applicationId));
   }
 }
 
@@ -375,7 +419,7 @@ export class PrismaApplicationRepository implements ApplicationRepository {
       id: row.id,
       action: row.action,
       actorId: row.actorId,
-      actorType: row.actorType as "DEVELOPER" | "ADMIN",
+      actorType: row.actorType as "DEVELOPER" | "ADMIN" | "USER",
       applicationId: row.applicationId ?? undefined,
       at: row.createdAt.toISOString(),
       detail: row.reason ?? undefined,
@@ -383,6 +427,70 @@ export class PrismaApplicationRepository implements ApplicationRepository {
       previousState: (row.previousState as ReviewState | null) ?? undefined,
       newState: (row.newState as ReviewState | null) ?? undefined,
     }));
+  }
+
+  async listExperienceSelections(participantId: string): Promise<ExperienceSelectionRecord[]> {
+    const rows = await this.prisma.experienceSelection.findMany({
+      where: { participantId },
+      orderBy: [{ lastOpenedAt: "desc" }, { addedAt: "desc" }],
+    });
+    return rows.map((row) => ({
+      participantId: row.participantId,
+      applicationId: row.applicationId,
+      status: row.status as "ACTIVE" | "PAUSED",
+      addedAt: row.addedAt.toISOString(),
+      lastOpenedAt: row.lastOpenedAt?.toISOString(),
+    }));
+  }
+
+  async findExperienceSelection(
+    participantId: string,
+    applicationId: string,
+  ): Promise<ExperienceSelectionRecord | null> {
+    const row = await this.prisma.experienceSelection.findUnique({
+      where: { participantId_applicationId: { participantId, applicationId } },
+    });
+    if (!row) return null;
+    return {
+      participantId: row.participantId,
+      applicationId: row.applicationId,
+      status: row.status as "ACTIVE" | "PAUSED",
+      addedAt: row.addedAt.toISOString(),
+      lastOpenedAt: row.lastOpenedAt?.toISOString(),
+    };
+  }
+
+  async upsertExperienceSelection(input: ExperienceSelectionRecord): Promise<ExperienceSelectionRecord> {
+    const row = await this.prisma.experienceSelection.upsert({
+      where: {
+        participantId_applicationId: {
+          participantId: input.participantId,
+          applicationId: input.applicationId,
+        },
+      },
+      create: {
+        participantId: input.participantId,
+        applicationId: input.applicationId,
+        status: input.status,
+        addedAt: new Date(input.addedAt),
+        lastOpenedAt: input.lastOpenedAt ? new Date(input.lastOpenedAt) : null,
+      },
+      update: {
+        status: input.status,
+        lastOpenedAt: input.lastOpenedAt ? new Date(input.lastOpenedAt) : null,
+      },
+    });
+    return {
+      participantId: row.participantId,
+      applicationId: row.applicationId,
+      status: row.status as "ACTIVE" | "PAUSED",
+      addedAt: row.addedAt.toISOString(),
+      lastOpenedAt: row.lastOpenedAt?.toISOString(),
+    };
+  }
+
+  async deleteExperienceSelection(participantId: string, applicationId: string): Promise<void> {
+    await this.prisma.experienceSelection.deleteMany({ where: { participantId, applicationId } });
   }
 }
 
