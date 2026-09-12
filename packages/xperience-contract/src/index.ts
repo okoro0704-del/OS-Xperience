@@ -193,6 +193,99 @@ export interface DirectoryApplicationView {
   publicationState: "PUBLISHED" | "NOT_PUBLISHED";
   experienced: boolean;
   experienceStatus?: ExperienceMembershipStatus;
+  /** Optional public metadata — never invent when absent. */
+  description?: string;
+  developerName?: string;
+  /** Where Directory discovered the eligible identity (not ownership). */
+  ecosystemSource?: "LIFEOS" | "XPERIENCE";
+}
+
+/**
+ * Read-only Digiconomy / LifeOS catalog claim.
+ * LifeOS remains source of truth — OS Experience projects eligibility only.
+ */
+export interface LifeOSCatalogApplicationClaim {
+  applicationId: string;
+  name: string;
+  version: string;
+  origin: string;
+  productionUrl: string;
+  xperienceUrl: string;
+  capabilities: Capability[];
+  /** PUBLIC eligible for Directory; PRIVATE never listed. */
+  visibility: "PUBLIC" | "PRIVATE";
+  /** Only PUBLISHED is Directory-eligible. DRAFT / UNPUBLISHED excluded. */
+  publicationState: "PUBLISHED" | "DRAFT" | "UNPUBLISHED";
+  description?: string;
+  developerName?: string;
+}
+
+/** Explicit eligibility — incomplete / private / draft never enter Directory. */
+export function isLifeOSDirectoryEligible(claim: LifeOSCatalogApplicationClaim): boolean {
+  if (claim.visibility !== "PUBLIC") return false;
+  if (claim.publicationState !== "PUBLISHED") return false;
+  if (!claim.applicationId?.trim() || !claim.name?.trim()) return false;
+  if (!safeHttpsUrl(claim.origin) || new URL(claim.origin).pathname !== "/") return false;
+  if (!safeHttpsUrl(claim.productionUrl) || !safeHttpsUrl(claim.xperienceUrl)) return false;
+  if (
+    !Array.isArray(claim.capabilities) ||
+    claim.capabilities.some((c) => !(CAPABILITIES as readonly string[]).includes(c))
+  ) {
+    return false;
+  }
+  return true;
+}
+
+export function parseLifeOSCatalogPayload(input: unknown): LifeOSCatalogApplicationClaim[] {
+  const raw = Array.isArray(input)
+    ? input
+    : input && typeof input === "object" && Array.isArray((input as { applications?: unknown }).applications)
+      ? (input as { applications: unknown[] }).applications
+      : null;
+  if (!raw) return [];
+  const out: LifeOSCatalogApplicationClaim[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const capabilities = Array.isArray(row.capabilities)
+      ? row.capabilities.filter(
+          (c): c is Capability => typeof c === "string" && (CAPABILITIES as readonly string[]).includes(c),
+        )
+      : [];
+    const visibility = row.visibility === "PRIVATE" ? "PRIVATE" : row.visibility === "PUBLIC" ? "PUBLIC" : null;
+    const publicationState =
+      row.publicationState === "PUBLISHED" ||
+      row.publicationState === "DRAFT" ||
+      row.publicationState === "UNPUBLISHED"
+        ? row.publicationState
+        : null;
+    if (
+      typeof row.applicationId !== "string" ||
+      typeof row.name !== "string" ||
+      typeof row.version !== "string" ||
+      typeof row.origin !== "string" ||
+      typeof row.productionUrl !== "string" ||
+      typeof row.xperienceUrl !== "string" ||
+      !visibility ||
+      !publicationState
+    ) {
+      continue;
+    }
+    out.push({
+      applicationId: row.applicationId,
+      name: row.name,
+      version: row.version,
+      origin: row.origin,
+      productionUrl: row.productionUrl,
+      xperienceUrl: row.xperienceUrl,
+      capabilities,
+      visibility,
+      publicationState,
+      description: typeof row.description === "string" ? row.description : undefined,
+      developerName: typeof row.developerName === "string" ? row.developerName : undefined,
+    });
+  }
+  return out;
 }
 
 export interface ExperienceMembershipView {

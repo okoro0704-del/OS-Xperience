@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DevelopmentAuthenticationProvider } from "../src/auth.js";
 import { XperienceService } from "../src/domain.js";
+import { StaticLifeOSCatalog } from "../src/lifeos-catalog.js";
 import { MemoryApplicationRepository } from "../src/repository.js";
 import { createApiServer, createRuntime } from "../src/server.js";
 import { VerificationService } from "../src/verification.js";
@@ -54,8 +55,24 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
     return;
   }
 
+  const catalog = new StaticLifeOSCatalog([
+    {
+      applicationId: "mr.fundzman",
+      name: "Mr FundzMan",
+      version: "1.0.0",
+      origin: "https://mr-fundzman.lifeos.example",
+      productionUrl: "https://mr-fundzman.lifeos.example/app",
+      xperienceUrl: "https://mr-fundzman.lifeos.example/xperience",
+      capabilities: ["COMMERCE", "PAYMENTS"],
+      visibility: "PUBLIC",
+      publicationState: "PUBLISHED",
+      developerName: "LifeOS",
+      description: "Creator finance vertical",
+    },
+  ]);
+
   const repo = new MemoryApplicationRepository();
-  const svc = new XperienceService(repo, new VerificationService());
+  const svc = new XperienceService(repo, new VerificationService(), catalog);
   const dev = { id: "dev-1", role: "DEVELOPER" as const };
   const admin = { id: "admin-1", role: "ADMIN" as const };
   await svc.register(dev, manifest);
@@ -64,7 +81,6 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
   await svc.transition(admin, "app.web", "APPROVED");
   await svc.transition(admin, "app.web", "PUBLISHED");
 
-  let apiPort = 0;
   const ui = createServer(async (req, res) => {
     const url = req.url === "/" ? "/index.html" : (req.url ?? "/index.html");
     try {
@@ -89,9 +105,10 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
     createRuntime({
       repository: repo,
       auth: new DevelopmentAuthenticationProvider(true),
+      lifeosCatalog: catalog,
     }),
   );
-  apiPort = await listen(api);
+  const apiPort = await listen(api);
 
   const browser = await chromium.launch({ headless: true });
   try {
@@ -117,26 +134,34 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
       }
       const homeBrand = document.body.innerText.includes("OS Experience");
       const shellLegacy = /Find an app|OS Shell 2\\.0\\.1|Not a primitive/i.test(document.body.innerText);
-      await req("POST", "/v1/experience/app.web");
+      const modernHome = /Your Digital Life|Explore Directory|Continue Your Experience|Your Experience is waiting/i.test(document.body.innerText);
+      const search = await req("GET", "/v1/directory?q=FundzMan");
+      await req("POST", "/v1/experience/mr.fundzman");
       const mine = await req("GET", "/v1/experience");
-      await req("POST", "/v1/experience/app.web/open");
-      await req("DELETE", "/v1/experience/app.web");
+      await req("POST", "/v1/experience/mr.fundzman/open");
+      await req("DELETE", "/v1/experience/mr.fundzman");
       const after = await req("GET", "/v1/experience");
-      const still = await req("GET", "/v1/directory/app.web");
-      await req("POST", "/v1/experience/app.web");
+      const still = await req("GET", "/v1/directory/mr.fundzman");
+      await req("POST", "/v1/experience/mr.fundzman");
       return {
         homeBrand,
         shellLegacy,
+        modernHome,
+        searchHit: search.applications[0]?.id,
         mine: mine.experiences.length,
         after: after.experiences.length,
-        still: still.id
+        still: still.id,
+        source: still.ecosystemSource
       };
     })()`);
     assert.equal(journey.homeBrand, true);
     assert.equal(journey.shellLegacy, false);
+    assert.equal(journey.modernHome, true);
+    assert.equal(journey.searchHit, "mr.fundzman");
     assert.equal(journey.mine, 1);
     assert.equal(journey.after, 0);
-    assert.equal(journey.still, "app.web");
+    assert.equal(journey.still, "mr.fundzman");
+    assert.equal(journey.source, "LIFEOS");
   } finally {
     await browser.close();
     api.close();

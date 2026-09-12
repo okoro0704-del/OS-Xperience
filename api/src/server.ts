@@ -10,6 +10,7 @@ import {
 } from "@digiconomy/xperience-contract";
 import { DevelopmentAuthenticationProvider, productionAuthProvider, type AuthenticationProvider } from "./auth.js";
 import { DomainError, XperienceService, type Actor } from "./domain.js";
+import { createLifeOSCatalogFromEnv, type LifeOSCatalogPort } from "./lifeos-catalog.js";
 import { closePrisma, prismaClient } from "./prisma.js";
 import {
   createApplicationRepository,
@@ -28,6 +29,7 @@ export function createRuntime(overrides?: {
   repository?: ApplicationRepository;
   auth?: AuthenticationProvider;
   verification?: VerificationService;
+  lifeosCatalog?: LifeOSCatalogPort;
 }): ApiRuntime {
   const mode = overrides?.repository ? undefined : resolveRepositoryMode();
   const repository =
@@ -39,10 +41,11 @@ export function createRuntime(overrides?: {
       ? new DevelopmentAuthenticationProvider(true)
       : productionAuthProvider());
   const verification = overrides?.verification ?? new VerificationService();
+  const lifeosCatalog = overrides?.lifeosCatalog ?? createLifeOSCatalogFromEnv();
   return {
     repository,
     auth,
-    service: new XperienceService(repository, verification),
+    service: new XperienceService(repository, verification, lifeosCatalog),
   };
 }
 

@@ -16,6 +16,8 @@ Developer and admin consoles are API-backed: they read and mutate server state t
 
 The consumer mobile app (`apps/xperience-mobile`) and consumer web app (`apps/os-experience`) are the user-side realization of publication: **Directory** lists `PUBLISHED` applications only, **Experience** adds membership to **My Experience**, and **Stop Experiencing** removes membership without deleting Directory publication. Experience selections persist via `ExperienceSelection` (not a separate marketplace/install database).
 
+**LifeOS / Digiconomy Directory projection:** Eligible LifeOS verticals may appear in Directory through a thin read-only `LifeOSCatalogPort` (`LIFEOS_DIRECTORY_CATALOG_URL` or `LIFEOS_DIRECTORY_CATALOG_JSON`). Eligibility requires public visibility, published state, and valid HTTPS destinations. LifeOS remains the source of identity; OS Experience does not copy verticals into a second Application registry. Xperience-published rows win on ID collision. `ExperienceSelection.applicationId` is an opaque identity (no Application FK) so ecosystem apps can be experienced without duplicating ownership.
+
 **Product separation:**
 - **OS Experience** (`apps/os-experience`, `apps/xperience-mobile`) — consumer Home / Directory / My Experience
 - **Xperience** (`apps/xperience-console`) — developer/admin registration and review

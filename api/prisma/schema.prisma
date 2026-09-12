@@ -67,7 +67,6 @@ model Application {
  reviews Review[]
  publications Publication[]
  audit AuditEvent[]
- experienceSelections ExperienceSelection[]
  @@index([developerId, state])
 }
 model ExperienceSelection {
@@ -77,7 +76,7 @@ model ExperienceSelection {
  status ExperienceMembershipStatus @default(ACTIVE)
  addedAt DateTime @default(now())
  lastOpenedAt DateTime?
- application Application @relation(fields: [applicationId], references: [id])
+ // applicationId is an opaque identity (Xperience or LifeOS). No FK — Experience ≠ ownership.
  @@unique([participantId, applicationId])
  @@index([participantId, status])
 }
