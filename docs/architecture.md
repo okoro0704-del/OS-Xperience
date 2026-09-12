@@ -10,6 +10,8 @@ The monorepo additions are `apps/xperience-console`, `api`, `packages/xperience-
 
 ## Persistence and identity
 
-`api/prisma/schema.prisma` and its initial SQL migration define PostgreSQL durable records. `ApplicationRepository` is the persistence seam: `PrismaApplicationRepository` is for configured production infrastructure, while the memory implementation is test-only. The API must not be deployed without a database client and `DATABASE_URL`.
+`api/prisma/schema.prisma` and its initial SQL migration define PostgreSQL durable records. `ApplicationRepository` is the persistence seam: `PrismaApplicationRepository` is for configured production infrastructure, while the memory implementation is an **explicit** test/dev adapter (`XPERIENCE_REPOSITORY=memory`) and is forbidden in production. Route handlers never call Prisma directly. The API fails closed when persistence is required but `DATABASE_URL` is missing.
+
+Developer and admin consoles are API-backed: they read and mutate server state through the shared contract/SDK. Review transitions and audit events are authoritative on the server. `APPROVED` does not auto-publish; capability approval is not runtime authorization.
 
 Authentication is a provider boundary. Production resolves through the Trust ID-compatible provider and fails closed until that provider is connected. The development adapter is available only with both `NODE_ENV=development` and `XPERIENCE_DEV_AUTH=true`; it is not an identity system and never proves application control.

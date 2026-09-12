@@ -1,7 +1,139 @@
-import { isAllowedMessageOrigin, validateHandshake, type XperienceReady } from "@digiconomy/xperience-contract";
-export interface XperienceClientOptions { applicationId: string; origin: string; parentWindow?: Window; }
+import {
+  isAllowedMessageOrigin,
+  validateHandshake,
+  type ApplicationManifestClaim,
+  type ApplicationView,
+  type AuditEventView,
+  type Capability,
+  type CapabilityReviewState,
+  type EvidenceType,
+  type ReviewState,
+  type VerificationEvidenceView,
+  type XperienceReady,
+} from "@digiconomy/xperience-contract";
+
+export interface XperienceClientOptions {
+  applicationId: string;
+  origin: string;
+  parentWindow?: Window;
+}
+
 /** Minimal channel only: no credentials, storage, identity proof, or authorization is transported. */
 export function createXperienceClient(options: XperienceClientOptions) {
   const parent = options.parentWindow ?? window.parent;
-  return { handshake(event: MessageEvent): XperienceReady | null { if (!isAllowedMessageOrigin(event.origin, options.origin)) return null; const result = validateHandshake(event.data, options); if (!result.ok) return null; const ready: XperienceReady = { type:"DIGICONOMY_XPERIENCE_READY", protocol:"1", applicationId:options.applicationId, nonce:result.value.nonce }; parent.postMessage(ready, event.origin); return ready; } };
+  return {
+    handshake(event: MessageEvent): XperienceReady | null {
+      if (!isAllowedMessageOrigin(event.origin, options.origin)) return null;
+      const result = validateHandshake(event.data, options);
+      if (!result.ok) return null;
+      const ready: XperienceReady = {
+        type: "DIGICONOMY_XPERIENCE_READY",
+        protocol: "1",
+        applicationId: options.applicationId,
+        nonce: result.value.nonce,
+      };
+      parent.postMessage(ready, event.origin);
+      return ready;
+    },
+  };
 }
+
+export type DevActorHeader = `${"DEVELOPER" | "ADMIN"}:${string}`;
+
+export interface XperienceApiClientOptions {
+  baseUrl: string;
+  actor: DevActorHeader;
+  email?: string;
+  fetchImpl?: typeof fetch;
+}
+
+export class XperienceApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+  ) {
+    super(message);
+  }
+}
+
+/** Typed HTTP client for developer/admin console surfaces. */
+export function createXperienceApiClient(options: XperienceApiClientOptions) {
+  const fetchImpl = options.fetchImpl ?? fetch;
+
+  async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      "X-Xperience-Dev-Actor": options.actor,
+    };
+    if (options.email) headers["X-Xperience-Dev-Email"] = options.email;
+    const response = await fetchImpl(`${options.baseUrl}${path}`, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const data = (await response.json().catch(() => ({}))) as { error?: string; code?: string };
+    if (!response.ok) {
+      throw new XperienceApiError(data.error ?? `Request failed (${response.status})`, response.status, data.code);
+    }
+    return data as T;
+  }
+
+  return {
+    me: () => request<{ id: string; role: string; email?: string | null }>("GET", "/v1/me"),
+    listApplications: () => request<{ applications: ApplicationView[] }>("GET", "/v1/applications"),
+    registerApplication: (manifest: ApplicationManifestClaim) =>
+      request<ApplicationView>("POST", "/v1/applications", { manifest }),
+    getApplication: (id: string) => request<ApplicationView>("GET", `/v1/applications/${encodeURIComponent(id)}`),
+    updateManifest: (id: string, manifest: ApplicationManifestClaim) =>
+      request<ApplicationView>("PATCH", `/v1/applications/${encodeURIComponent(id)}/manifest`, { manifest }),
+    addEvidence: (id: string, type: EvidenceType, locator: string) =>
+      request<{
+        application: ApplicationView;
+        verification: { status: string; detail: string };
+      }>("POST", `/v1/applications/${encodeURIComponent(id)}/evidence`, { type, locator }),
+    listEvidence: (id: string) =>
+      request<{ evidence: VerificationEvidenceView[] }>("GET", `/v1/applications/${encodeURIComponent(id)}/evidence`),
+    submit: (id: string) =>
+      request<ApplicationView>("POST", `/v1/applications/${encodeURIComponent(id)}/submit`),
+    transition: (id: string, state: ReviewState, reason?: string) =>
+      request<ApplicationView>("POST", `/v1/applications/${encodeURIComponent(id)}/transition`, { state, reason }),
+    reviewStatus: (id: string) =>
+      request<{ applicationId: string; state: ReviewState; revision: number }>(
+        "GET",
+        `/v1/applications/${encodeURIComponent(id)}/review-status`,
+      ),
+    adminQueue: () => request<{ applications: ApplicationView[] }>("GET", "/v1/admin/queue"),
+    adminGet: (id: string) =>
+      request<ApplicationView>("GET", `/v1/admin/applications/${encodeURIComponent(id)}`),
+    adminEvidence: (id: string) =>
+      request<{ evidence: VerificationEvidenceView[] }>(
+        "GET",
+        `/v1/admin/applications/${encodeURIComponent(id)}/evidence`,
+      ),
+    adminAudit: (applicationId?: string) =>
+      applicationId
+        ? request<{ events: AuditEventView[] }>(
+            "GET",
+            `/v1/admin/applications/${encodeURIComponent(applicationId)}/audit`,
+          )
+        : request<{ events: AuditEventView[] }>("GET", "/v1/admin/audit"),
+    reviewCapability: (
+      id: string,
+      capability: Capability,
+      status: Exclude<CapabilityReviewState, "REQUESTED">,
+      reason?: string,
+    ) =>
+      request<ApplicationView>("POST", `/v1/admin/applications/${encodeURIComponent(id)}/capabilities`, {
+        capability,
+        status,
+        reason,
+      }),
+    adminAction: (id: string, action: string, reason?: string) =>
+      request<ApplicationView>("POST", `/v1/admin/applications/${encodeURIComponent(id)}/actions/${action}`, {
+        reason,
+      }),
+  };
+}
+
+export type XperienceApiClient = ReturnType<typeof createXperienceApiClient>;

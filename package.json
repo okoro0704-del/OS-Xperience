@@ -5,19 +5,26 @@
   "description": "OS Shell — thin browser-hosted runtime for web apps and Digiconomy-native apps. Not a primitive.",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "api"
   ],
   "scripts": {
     "dev": "npm run dev -w @osshell/web",
+    "dev:xperience": "npm run dev -w @digiconomy/xperience-console",
     "dev:demo": "npm run dev -w @osshell/demo-notes",
     "build": "npm run build -w @osshell/contract && npm run build -w @osshell/runtime && npm run build -w @osshell/sdk && npm run build -w @osshell/web",
     "typecheck": "npm run build -w @osshell/contract && npm run typecheck -w @osshell/contract && npm run typecheck -w @osshell/runtime && npm run typecheck -w @osshell/sdk && npm run typecheck -w @osshell/web && npm run typecheck -w @osshell/demo-notes",
     "test": "npm run build -w @osshell/contract && npm run build -w @osshell/runtime && npm run build -w @osshell/sdk && node --import tsx --test packages/contract/test/*.test.ts packages/runtime/test/*.test.ts",
     "android:sync": "npm run build -w @osshell/web && npx cap sync android",
     "android:open": "npx cap open android",
-    "android:release": "npm run android:sync && cd android && gradlew.bat assembleRelease"
+    "android:release": "npm run android:sync && cd android && gradlew.bat assembleRelease",
+    "build:xperience": "npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && node scripts/prisma-xperience.mjs generate && npm run build -w @digiconomy/xperience-api && npm run build -w @digiconomy/xperience-console",
+    "typecheck:xperience": "npm run typecheck -w @digiconomy/xperience-contract && npm run typecheck -w @digiconomy/xperience-sdk && node scripts/prisma-xperience.mjs generate && npm run typecheck -w @digiconomy/xperience-api && npm run typecheck -w @digiconomy/xperience-console",
+    "test:xperience": "npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && node scripts/prisma-xperience.mjs generate && node --test-concurrency=1 --import tsx --test packages/xperience-contract/test/*.test.ts api/test/*.test.ts scripts/xperience-architecture-guard.test.mjs",
+    "test:xperience:browser": "npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && node scripts/prisma-xperience.mjs generate && node --test-concurrency=1 --import tsx --test api/test/browser-workflow.test.ts"
   },
   "devDependencies": {
+    "playwright": "^1.51.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2"
   },
