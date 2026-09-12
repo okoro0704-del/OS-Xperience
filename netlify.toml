@@ -1,7 +1,8 @@
-# OS Shell — Netlify (monorepo root as base directory)
+# OS Experience — consumer web (Netlify)
+# Separate from OS Shell (apps/web) and Xperience developer console (apps/xperience-console).
 [build]
-  command = "npm ci && npm run build -w @osshell/contract && npm run build -w @osshell/runtime && npm run build -w @osshell/sdk && npm run build -w @osshell/web"
-  publish = "apps/web/dist"
+  command = "npm ci && npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && npm run build -w @digiconomy/os-experience"
+  publish = "apps/os-experience/dist"
 
 [build.environment]
   NODE_VERSION = "20"

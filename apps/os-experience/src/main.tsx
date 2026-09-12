@@ -106,7 +106,11 @@ function App() {
       setFeatured(feat.applications);
       setMine(exp.experiences);
     } catch (err) {
-      setError(err instanceof XperienceApiError ? err.message : "We couldn't load your Experience.");
+      setError(
+        err instanceof XperienceApiError
+          ? err.message
+          : "We couldn't load your Experience.",
+      );
       setDirectory([]);
       setFeatured([]);
       setMine([]);
@@ -151,7 +155,48 @@ function App() {
   const discoverItems = featured.filter((app) => !app.experienced);
 
   return (
-    <div className={`app-shell ${screen.name === "experience" ? "immersive" : ""}`} data-testid="xperience-mobile">
+    <div className={`app-shell ${screen.name === "experience" ? "immersive" : ""}`} data-testid="os-experience">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
+      <div className="layout">
+        {screen.name !== "experience" && screen.name !== "detail" ? (
+          <nav className="side-nav" aria-label="Primary" data-testid="side-nav">
+            <div className="brand side-brand">
+              <span className="brand-mark" />
+              OS Experience
+            </div>
+            <NavButton active={tab === "home"} label="Home" onClick={() => setScreen({ name: "tabs", tab: "home" })} icon="⌂" />
+            <NavButton
+              active={tab === "directory"}
+              label="Directory"
+              onClick={() => setScreen({ name: "tabs", tab: "directory" })}
+              icon="▦"
+            />
+            <button
+              className="nav-plus side-plus"
+              aria-label="Add experience"
+              data-testid="nav-plus-side"
+              type="button"
+              onClick={() => setScreen({ name: "tabs", tab: "directory" })}
+            >
+              +
+            </button>
+            <NavButton
+              active={tab === "my-experience"}
+              label="My Experience"
+              onClick={() => setScreen({ name: "tabs", tab: "my-experience" })}
+              icon="▣"
+            />
+            <NavButton
+              active={tab === "profile"}
+              label="Profile"
+              onClick={() => setScreen({ name: "tabs", tab: "profile" })}
+              icon="☺"
+            />
+          </nav>
+        ) : null}
+        <div className="content-column" id="main-content">
       {screen.name === "tabs" && tab === "home" ? (
         <Home
           name={displayName}
@@ -302,6 +347,8 @@ function App() {
           }
         />
       ) : null}
+        </div>
+      </div>
     </div>
   );
 }
@@ -348,17 +395,17 @@ function Home(props: {
           <button className="icon-btn" aria-label="Notifications">
             🔔
           </button>
-          <div className="avatar">{initials(props.name)}</div>
+          <div className="avatar" aria-hidden>{initials(props.name)}</div>
         </div>
       </header>
       <section className="page" data-testid="home">
         <div className="greeting">
-          <h1>{greeting(props.name)}</h1>
+          <h1>{greeting(props.name)} 👋</h1>
           <p>Your Digital Life. Your Applications. One Experience.</p>
         </div>
-        <button className="search-box" onClick={props.onSearch} data-testid="home-search">
-          <span>⌕</span>
-          <input readOnly placeholder="Search apps, creators, services, or anything..." />
+        <button className="search-box" onClick={props.onSearch} data-testid="home-search" type="button">
+          <span aria-hidden>⌕</span>
+          <input readOnly tabIndex={-1} placeholder="Search apps, creators, services..." aria-label="Search" />
         </button>
         <StateBox loading={props.loading} error={props.error} onRetry={props.onRetry} />
         <div className="section-head">
@@ -430,7 +477,7 @@ function Directory(props: {
       <header className="topbar">
         <div>
           <div className="brand">App Directory</div>
-          <p className="lede">Everything available to experience.</p>
+          <p className="lede">Explore every application available to experience.</p>
         </div>
         <button className="icon-btn" onClick={props.onSearch} aria-label="Search">
           ⌕
@@ -502,7 +549,7 @@ function MyExperience(props: {
       <header className="topbar">
         <div>
           <div className="brand">My Experience</div>
-          <p className="lede">Applications you have chosen to experience.</p>
+          <p className="lede">Your personal collection of applications. Launch, manage or remove anytime.</p>
         </div>
       </header>
       <section className="page" data-testid="my-experience">
@@ -567,7 +614,7 @@ function Profile({ name, userId, onHome }: { name: string; userId: string; onHom
         </div>
         <b style={{ marginTop: 12 }}>{name}</b>
         <div className="meta">Participant {userId}</div>
-        <p className="lede">Identity is asserted by Trust ID in production. This surface shows your Experience participant profile only.</p>
+        <p className="lede">Identity is asserted by Trust ID in production. This is your OS Experience participant profile — not the Xperience developer console.</p>
         <button className="primary block" onClick={onHome}>
           Back to Home
         </button>

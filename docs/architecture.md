@@ -14,6 +14,12 @@ The monorepo additions are `apps/xperience-console`, `api`, `packages/xperience-
 
 Developer and admin consoles are API-backed: they read and mutate server state through the shared contract/SDK. Review transitions and audit events are authoritative on the server. `APPROVED` does not auto-publish; capability approval is not runtime authorization.
 
-The consumer mobile app (`apps/xperience-mobile`) is the user-side realization of publication: **Directory** lists `PUBLISHED` applications only, **Experience** adds membership to **My Experience**, and **Stop Experiencing** removes membership without deleting Directory publication. Experience selections persist via `ExperienceSelection` (not a separate marketplace/install database).
+The consumer mobile app (`apps/xperience-mobile`) and consumer web app (`apps/os-experience`) are the user-side realization of publication: **Directory** lists `PUBLISHED` applications only, **Experience** adds membership to **My Experience**, and **Stop Experiencing** removes membership without deleting Directory publication. Experience selections persist via `ExperienceSelection` (not a separate marketplace/install database).
+
+**Product separation:**
+- **OS Experience** (`apps/os-experience`, `apps/xperience-mobile`) — consumer Home / Directory / My Experience
+- **Xperience** (`apps/xperience-console`) — developer/admin registration and review
+- **OS Shell** (`apps/web`) — thin operating surface; remains a separate product and must not be confused with OS Experience consumer UI
+
 
 Authentication is a provider boundary. Production resolves through the Trust ID-compatible provider and fails closed until that provider is connected. The development adapter is available only with both `NODE_ENV=development` and `XPERIENCE_DEV_AUTH=true`; it is not an identity system and never proves application control.
