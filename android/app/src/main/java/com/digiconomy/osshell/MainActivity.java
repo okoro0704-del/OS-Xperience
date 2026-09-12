@@ -7,8 +7,8 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
   @Override
   public void onCreate(Bundle savedInstanceState) {
+    registerPlugin(ShellAppLauncherPlugin.class);
     super.onCreate(savedInstanceState);
-    // Never enable WebView debugging in production release builds.
     WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG);
   }
 }

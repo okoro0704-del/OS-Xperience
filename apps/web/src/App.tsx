@@ -192,7 +192,7 @@ import {
   type ShellSession,
   type Surface,
 } from "./surfaces";
-import { attachNativeShellBridge } from "./native-bridge";
+import { attachNativeShellBridge, isNativeShell, openFirstPartyAndroidApp } from "./native-bridge";
 
 type Place = { surface: Surface; origin: string | null; appId?: string | null; sessionId?: string };
 
@@ -299,6 +299,7 @@ export function App() {
   const [networkOnline, setNetworkOnline] = useState(() =>
     typeof navigator !== "undefined" ? navigator.onLine : true,
   );
+  const [appSearch, setAppSearch] = useState("");
   const [operatingContext, setOperatingContext] = useState<CurrentOperatingContext | null>(() =>
     operatingContextStore.current(),
   );
@@ -2801,7 +2802,18 @@ export function App() {
     setPendingIntent(null);
   }
 
-  function launchNativeApp(id: "mybrandos" | "lifeos") {
+  async function launchNativeApp(id: "mybrandos" | "lifeos") {
+    // On Android APK: prefer launching the installed first-party package.
+    if (isNativeShell()) {
+      const native = await openFirstPartyAndroidApp(id);
+      if (native.ok) {
+        setError(null);
+        return;
+      }
+      if (native.reason === "not_installed") {
+        setError(`${id === "lifeos" ? "LifeOS" : "mybrandOS"} is not installed on this device. Opening the web app instead.`);
+      }
+    }
     const launch = nativeLaunch(id, policy);
     if ("error" in launch) {
       setError(launch.error);
@@ -3110,177 +3122,17 @@ export function App() {
           <HomeSurface
             recents={recents}
             favorites={favorites}
-            natives={natives}
+            natives={natives.filter((app) => app.id === "lifeos" || app.id === "mybrandos")}
             input={input}
             busy={busy}
             error={error}
             onInput={setInput}
             onLoad={() => void openHref(input, false)}
             onOpenRecent={(item) => void openHref(item.href || item.origin, item.class !== "web")}
-            onLaunchNative={(id) => openInstalledApp(id)}
+            onLaunchNative={(id) => void launchNativeApp(id)}
             onDigitalLife={() => go({ surface: "digitallife", origin: null })}
-            onOpenLauncher={() => {
-              go({ surface: "launcher", origin: null });
-              setObjectiveRoutes(
-                suggestObjectives({
-                  registry: installedApps,
-                  selectedObject: selectedObject ?? operatingContext?.objectReference ?? null,
-                  sessions: operatingSessions,
-                  runtimeHints: runtimeHints(),
-                  preferences: applicationPreferences,
-                  operatingContext,
-                }),
-              );
-            }}
-            objectiveShortcuts={[
-              {
-                label: "Create Video",
-                onClick: () => {
-                  setLauncherQuery("Create video");
-                  go({ surface: "launcher", origin: null });
-                  resolveLauncherObjective("Create video");
-                },
-              },
-              {
-                label: "Create Note",
-                onClick: () => {
-                  setLauncherQuery("Create note");
-                  go({ surface: "launcher", origin: null });
-                  resolveLauncherObjective("Create note");
-                },
-              },
-              {
-                label: "Continue",
-                onClick: () => {
-                  setLauncherQuery("Continue");
-                  go({ surface: "launcher", origin: null });
-                  resolveLauncherObjective("Continue");
-                },
-              },
-              {
-                label: "Open Digital Life",
-                onClick: () => {
-                  setLauncherQuery("Open digital life");
-                  go({ surface: "launcher", origin: null });
-                  resolveLauncherObjective("Open digital life");
-                },
-              },
-            ]}
-            grantNotes={focused ? grantedCapabilityNotes({ origin: focused.origin, grants }) : []}
-            recoveryPrompt={
-              recoveryOffer
-                ? {
-                    label: recoveryOffer.context.label ?? recoveryOffer.resumePoints[0]?.label ?? "Previous session",
-                    onResume: () => {
-                      const resumed = operatingSessionsStore.resume(recoveryOffer.sessionId);
-                      refreshOperatingSessions();
-                      setRecoveryOffer(null);
-                      if (!resumed.ok) {
-                        setError(resumed.code);
-                        return;
-                      }
-                      auditStore.append(
-                        sessionAuditEntry({
-                          origin: window.location.origin,
-                          decision: "session_resumed",
-                          result: "recovery",
-                          sessionId: recoveryOffer.sessionId,
-                        }),
-                      );
-                      const point = resumed.value.resumePoint;
-                      if (point) openInstalledApp(point.appId, point.route ?? "/", { skipResumePrompt: true });
-                      else go({ surface: "session", origin: null });
-                    },
-                    onDismiss: () => setRecoveryOffer(null),
-                  }
-                : null
-            }
-            recentWork={(recentContinuity.length
-              ? recentContinuity
-              : operatingContext
-                ? [operatingContext]
-                : []
-            )
-              .slice(0, 4)
-              .map((item) => {
-                const status = revalidateOperatingContext({
-                  context: item,
-                  registry: installedApps,
-                  sessions: operatingSessions,
-                }).status;
-                const appName = item.currentAppId
-                  ? findApplicationById(installedApps, item.currentAppId)?.name
-                  : undefined;
-                return {
-                  label: item.label ?? item.objectReference?.title ?? "Current work",
-                  appName,
-                  contextType: item.objectReference?.type ?? item.objectiveType,
-                  status,
-                  statusLabel:
-                    status === "SESSION_ENDED"
-                      ? "Start Fresh"
-                      : sessionResumeLabel(
-                          operatingSessions.find((session) => session.sessionId === item.sessionId)?.state,
-                        ),
-                  onOpen: () => {
-                    operatingContextStore.open(item.id);
-                    refreshOperatingContext();
-                    go({ surface: "recent-work", origin: null });
-                  },
-                  onContinue: () => {
-                    operatingContextStore.open(item.id);
-                    refreshOperatingContext();
-                    setLauncherQuery("Continue");
-                    go({ surface: "launcher", origin: null });
-                    resolveLauncherObjective("Continue");
-                  },
-                };
-              })}
-            continueSuggestions={(operatingContext?.suggestedNextObjectives ?? []).map((item) => ({
-              label: item.label ?? `${item.type}${item.target ? ` ${item.target}` : ""}`,
-              onClick: () => {
-                const query = item.label ?? `${item.type} ${item.target ?? "this"}`.trim();
-                setLauncherQuery(query);
-                go({ surface: "launcher", origin: null });
-                resolveLauncherObjective(query);
-              },
-            }))}
-            ambiguityChoices={ambiguityChoices.map((item) => ({
-              label: item.label,
-              detail: item.detail ?? item.appId,
-              onClick: () => {
-                if (item.objectReference) {
-                  selectedObjectStore.select(item.objectReference);
-                  setSelectedObject(item.objectReference);
-                  const existing = operatingContextStore.current();
-                  persistOperatingContext({
-                    id: existing?.id,
-                    currentAppId: item.appId ?? existing?.currentAppId,
-                    objectReference: item.objectReference,
-                    label: item.label,
-                    sessionId: item.sessionId ?? existing?.sessionId,
-                  });
-                }
-                setAmbiguityChoices([]);
-                setLauncherQuery("Preview this");
-                go({ surface: "launcher", origin: null });
-                resolveLauncherObjective("Preview this");
-              },
-            }))}
-            recommendedActions={(personalContext?.contextualActions ?? [])
-              .filter((item) => item.availability === "AVAILABLE" || item.availability === "PERMISSION_REQUIRED")
-              .slice(0, 4)
-              .map((item) => ({
-                label: item.label,
-                detail: item.detail,
-                why: item.why,
-                onClick: () => {
-                  const query = `${item.label} this`;
-                  setLauncherQuery(query);
-                  go({ surface: "launcher", origin: null });
-                  resolveLauncherObjective(query);
-                },
-              }))}
+            appSearch={appSearch}
+            onAppSearch={setAppSearch}
           />
         ) : null}
         {surface === "recent-work" ? (
@@ -3489,9 +3341,9 @@ export function App() {
           </div>
         ) : null}
         {surface === "digitallife" ? (
-          <DigitalLifePane onLaunch={launchNativeApp} activeName={focused?.identity.name ?? null} />
+          <DigitalLifePane onLaunch={(id) => void launchNativeApp(id)} activeName={focused?.identity.name ?? null} />
         ) : null}
-        {surface === "devices" ? <DevicesPane onLaunch={() => launchNativeApp("mybrandos")} /> : null}
+        {surface === "devices" ? <DevicesPane onLaunch={() => void launchNativeApp("mybrandos")} /> : null}
         {surface === "session" ? (
           <SessionSurface
             current={
@@ -4012,66 +3864,19 @@ export function App() {
         ) : null}
       </main>
 
-      <nav className="dock">
-        <button className={surface === "home" ? "active" : ""} type="button" onClick={() => go({ surface: "home", origin: null })}>
+      <nav className="dock" aria-label="Shell">
+        <button className={surface === "home" || surface === "app" ? "active" : ""} type="button" onClick={() => go({ surface: "home", origin: null })}>
           Home
         </button>
         <button
-          className={surface === "launcher" ? "active" : ""}
+          className={surface === "digitallife" ? "active" : ""}
           type="button"
-          onClick={() => {
-            go({ surface: "launcher", origin: null });
-            setObjectiveRoutes(
-              suggestObjectives({
-                registry: installedApps,
-                selectedObject: selectedObject ?? operatingContext?.objectReference ?? null,
-                sessions: operatingSessions,
-                runtimeHints: runtimeHints(),
-                preferences: applicationPreferences,
-                operatingContext,
-              }),
-            );
-          }}
+          onClick={() => go({ surface: "digitallife", origin: null })}
         >
-          Do
-        </button>
-        <button className={surface === "apps" ? "active" : ""} type="button" onClick={() => go({ surface: "apps", origin: null })}>
           Apps
         </button>
-        <button className={surface === "session" ? "active" : ""} type="button" onClick={() => go({ surface: "session", origin: null })}>
-          Session
-        </button>
-        <button
-          className={surface === "recent-work" ? "active" : ""}
-          type="button"
-          onClick={() => {
-            refreshOperatingContext();
-            go({ surface: "recent-work", origin: null });
-          }}
-        >
-          Recent
-        </button>
-        <button className={surface === "actions" ? "active" : ""} type="button" onClick={() => go({ surface: "actions", origin: null })}>
-          Actions
-        </button>
-        <button
-          className={surface === "search" ? "active" : ""}
-          type="button"
-          onClick={() => {
-            go({ surface: "search", origin: null });
-            if (!searchResults.length) void runShellSearch("");
-          }}
-        >
-          Search
-        </button>
-        <button className={surface === "digitallife" ? "active" : ""} type="button" onClick={() => go({ surface: "digitallife", origin: null })}>
-          Digital Life
-        </button>
-        <button className={surface === "devices" ? "active" : ""} type="button" onClick={() => go({ surface: "devices", origin: null })}>
-          Devices
-        </button>
-        <button className={surface === "user" ? "active" : ""} type="button" onClick={() => go({ surface: "user", origin: null })}>
-          User
+        <button type="button" onClick={back} disabled={!canBack} aria-label="Back">
+          Back
         </button>
       </nav>
 

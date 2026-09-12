@@ -1,7 +1,7 @@
-# Shell Demo Notes — Netlify (monorepo root as base directory)
+# OS Shell — Netlify (monorepo root as base directory)
 [build]
-  command = "npm ci && npm run build -w @osshell/contract && npm run build -w @osshell/sdk && npm run build -w @osshell/demo-notes"
-  publish = "apps/demo-notes/dist"
+  command = "npm ci && npm run build -w @osshell/contract && npm run build -w @osshell/runtime && npm run build -w @osshell/sdk && npm run build -w @osshell/web"
+  publish = "apps/web/dist"
 
 [build.environment]
   NODE_VERSION = "20"

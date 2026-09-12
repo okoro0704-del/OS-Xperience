@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_MYBRANDOS_ORIGINS?: string;
   readonly VITE_LIFEOS_ORIGINS?: string;
   readonly VITE_COMPATIBLE_ORIGINS?: string;
+  readonly VITE_LIFEOS_ANDROID_PACKAGE?: string;
+  readonly VITE_MYBRANDOS_ANDROID_PACKAGE?: string;
   readonly PROD: boolean;
   readonly DEV: boolean;
   readonly MODE: string;

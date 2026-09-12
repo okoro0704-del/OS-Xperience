@@ -79,198 +79,60 @@ export function HomeSurface(props: {
   recoveryPrompt?: { label: string; onResume: () => void; onDismiss: () => void } | null;
   onOpenLauncher?: () => void;
   objectiveShortcuts?: Array<{ label: string; onClick: () => void }>;
+  /** Simple test home: search + LifeOS / mybrandOS only. */
+  appSearch?: string;
+  onAppSearch?: (value: string) => void;
 }) {
+  const testApps = props.natives.filter((app) => app.id === "lifeos" || app.id === "mybrandos");
+  const query = (props.appSearch ?? "").trim().toLowerCase();
+  const visible = query
+    ? testApps.filter(
+        (app) =>
+          app.name.toLowerCase().includes(query) ||
+          app.id.toLowerCase().includes(query) ||
+          (app.purpose ?? "").toLowerCase().includes(query),
+      )
+    : testApps;
+
   return (
-    <div className="panel">
-      <div className="eyebrow">Welcome</div>
-      <h1>What is relevant right now?</h1>
-      <p>The Shell orients you with operating context. Applications own the work.</p>
+    <div className="panel simple-home">
+      <div className="eyebrow">OS Shell</div>
+      <h1>Find an app</h1>
+      <p className="muted">Search and open LifeOS or mybrandOS. The Shell routes; applications execute.</p>
 
-      {props.onOpenLauncher ? (
-        <div className="actions" style={{ marginBottom: 12 }}>
-          <button className="btn primary" type="button" onClick={props.onOpenLauncher}>
-            Open launcher
-          </button>
-        </div>
-      ) : null}
+      <label className="sr-only" htmlFor="shell-app-search">
+        Search apps
+      </label>
+      <input
+        id="shell-app-search"
+        type="search"
+        value={props.appSearch ?? ""}
+        onChange={(event) => props.onAppSearch?.(event.target.value)}
+        placeholder="Search LifeOS or mybrandOS"
+        aria-label="Search apps"
+        className="app-search"
+        autoComplete="off"
+      />
 
-      {props.objectiveShortcuts?.length ? (
-        <>
-          <h2>Start</h2>
-          <div className="list">
-            {props.objectiveShortcuts.map((item) => (
-              <button key={item.label} type="button" onClick={item.onClick}>
-                <div>{item.label}</div>
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {props.recoveryPrompt ? (
-        <div className="note">
-          <div>Resume previous session?</div>
-          <div className="muted">{props.recoveryPrompt.label}</div>
-          <div className="actions" style={{ marginTop: 8 }}>
-            <button className="btn primary" type="button" onClick={props.recoveryPrompt.onResume}>
-              Resume
-            </button>
-            <button className="btn" type="button" onClick={props.recoveryPrompt.onDismiss}>
-              Start fresh
-            </button>
-          </div>
-        </div>
-      ) : null}
-
-      {props.recentWork?.length ? (
-        <>
-          <h2>Continue Working</h2>
-          <div className="list">
-            {props.recentWork.map((item) => (
-              <div key={item.label + (item.appName ?? "") + (item.status ?? "")} className="note" style={{ marginBottom: 8 }}>
-                <div>{item.label}</div>
-                <div className="muted">
-                  {item.appName ?? "Application"}
-                  {item.contextType ? ` · ${item.contextType}` : ""}
-                  {item.status && item.status !== "AVAILABLE" ? ` · ${item.status}` : ""}
-                </div>
-                <div className="actions" style={{ marginTop: 8 }}>
-                      {item.status === "AVAILABLE" || !item.status ? (
-                    <button className="btn primary" type="button" onClick={item.onContinue ?? item.onOpen}>
-                      {item.statusLabel ?? "Continue"}
-                    </button>
-                  ) : (
-                    <button className="btn" type="button" onClick={item.onOpen}>
-                      View details
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {props.continueSuggestions?.length ? (
-        <>
-          <h2>Next</h2>
-          <div className="list">
-            {props.continueSuggestions.map((item) => (
-              <button key={item.label} type="button" onClick={item.onClick}>
-                <div>{item.label}</div>
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {props.ambiguityChoices?.length ? (
-        <>
-          <h2>Which one?</h2>
-          <p className="muted">Multiple matching objects. Choose explicitly — the Shell will not guess.</p>
-          <div className="list">
-            {props.ambiguityChoices.map((item) => (
-              <button key={item.label + (item.detail ?? "")} type="button" onClick={item.onClick}>
-                <div>{item.label}</div>
-                {item.detail ? <div className="muted">{item.detail}</div> : null}
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {props.recommendedActions?.length ? (
-        <>
-          <h2>Recommended</h2>
-          <p className="muted">Deterministic actions for your current work — not behavioral profiling.</p>
-          <div className="list">
-            {props.recommendedActions.map((item) => (
-              <button key={item.label + (item.detail ?? "")} type="button" onClick={item.onClick}>
-                <div>{item.label}</div>
-                <div className="muted">
-                  {item.detail ?? ""}
-                  {item.why ? ` · ${item.why}` : ""}
-                </div>
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      {props.grantNotes?.length ? (
-        <div className="note">
-          {props.grantNotes.map((note) => (
-            <div key={note}>{note}</div>
-          ))}
-        </div>
-      ) : null}
-
-      <h2>Open</h2>
-      <form
-        className="actions"
-        onSubmit={(event) => {
-          event.preventDefault();
-          props.onLoad();
-        }}
-      >
-        <input
-          type="url"
-          value={props.input}
-          onChange={(event) => props.onInput(event.target.value)}
-          placeholder="https://example.com"
-          aria-label="Open URL"
-          style={{ flex: 1, minWidth: 160 }}
-        />
-        <button className="btn primary" type="submit" disabled={props.busy}>
-          Open
-        </button>
-      </form>
       {props.error ? <div className="note blocked">{props.error}</div> : null}
 
-      {props.favorites.length ? (
-        <>
-          <h2>Favorites</h2>
-          <div className="list">
-            {props.favorites.map((item) => (
-              <button key={item.origin} type="button" onClick={() => props.onOpenRecent({ ...item, href: item.origin, openedAt: "" })}>
-                <div>{item.name}</div>
-                <div className="muted">{item.kind === "url" ? "URL" : "Application"} · {item.class}</div>
-              </button>
-            ))}
-          </div>
-        </>
-      ) : null}
-
-      <h2>Recent</h2>
-      <div className="list">
-        {props.recents.length === 0 ? <p className="empty">Nothing opened yet.</p> : null}
-        {props.recents.map((item) => (
-          <button key={item.origin} type="button" onClick={() => props.onOpenRecent(item)}>
-            <div>{item.name}</div>
-            <div className="muted">{item.kind === "url" ? item.href : item.origin} · {item.class}</div>
-          </button>
-        ))}
-      </div>
-
-      <h2>Digital Life</h2>
-      <div className="list">
-        {props.natives.map((app) => (
+      <div className="list test-apps" style={{ marginTop: 16 }}>
+        {visible.length === 0 ? <p className="empty">No matching apps.</p> : null}
+        {visible.map((app) => (
           <button
             key={app.id}
             type="button"
+            className="test-app-row"
+            disabled={props.busy}
             onClick={() => {
               if (app.id === "mybrandos" || app.id === "lifeos") props.onLaunchNative(app.id);
-              else props.onOpenRecent({ origin: app.origin, href: app.origin, name: app.name, class: app.class, kind: app.kind, openedAt: "" });
             }}
           >
-            <div>{app.name}</div>
-            <div className="muted">{app.purpose}</div>
+            <div className="test-app-name">{app.name}</div>
+            <div className="muted">{app.id === "lifeos" ? "Consumer Digital Life" : "Creator Digital Life"}</div>
+            <div className="muted test-app-origin">{app.origin}</div>
           </button>
         ))}
-        <button type="button" onClick={props.onDigitalLife}>
-          <div>My Digital Life</div>
-          <div className="muted">Creator and consumer apps stay in mybrandOS and LifeOS.</div>
-        </button>
       </div>
     </div>
   );
@@ -746,24 +608,18 @@ export function DigitalLifePane(props: {
   activeName: string | null;
 }) {
   return (
-    <div className="panel">
-      <div className="eyebrow">Digital Life</div>
-      <h1>Digital Life available</h1>
-      <p>
-        Knowing which Digital Life you are operating is not the same as owning it. The Shell does not hold Assets,
-        files, balances, or device secrets.
-      </p>
-      <div className="note">
-        Active application: {props.activeName ?? "None"}. Native applications remain mybrandOS and LifeOS.
-      </div>
-      <div className="list">
-        <button type="button" onClick={() => props.onLaunch("mybrandos")}>
-          <div>mybrandOS</div>
-          <div className="muted">Creator Digital Life. Production and Device Bridge stay there.</div>
+    <div className="panel simple-home">
+      <div className="eyebrow">OS Shell</div>
+      <h1>Apps</h1>
+      <p className="muted">Open LifeOS or mybrandOS. Active: {props.activeName ?? "None"}.</p>
+      <div className="list test-apps">
+        <button type="button" className="test-app-row" onClick={() => props.onLaunch("lifeos")}>
+          <div className="test-app-name">LifeOS</div>
+          <div className="muted">Consumer Digital Life</div>
         </button>
-        <button type="button" onClick={() => props.onLaunch("lifeos")}>
-          <div>LifeOS</div>
-          <div className="muted">Consumer Digital Life. Discovery and library stay there.</div>
+        <button type="button" className="test-app-row" onClick={() => props.onLaunch("mybrandos")}>
+          <div className="test-app-name">mybrandOS</div>
+          <div className="muted">Creator Digital Life</div>
         </button>
       </div>
     </div>
