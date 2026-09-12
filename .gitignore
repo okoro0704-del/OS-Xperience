@@ -15,3 +15,6 @@ android/keystore.properties
 .idea
 .capacitor
 .railway
+
+.netlify/
+
