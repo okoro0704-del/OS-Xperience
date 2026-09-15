@@ -259,7 +259,20 @@ export function parseLifeOSCatalogPayload(input: unknown): LifeOSCatalogApplicat
           (c): c is Capability => typeof c === "string" && (CAPABILITIES as readonly string[]).includes(c),
         )
       : [];
-    const visibility = row.visibility === "PRIVATE" ? "PRIVATE" : row.visibility === "PUBLIC" ? "PUBLIC" : null;
+    // LifeOS gateway Directory rows use `id`; claim model uses applicationId.
+    const applicationId =
+      typeof row.applicationId === "string"
+        ? row.applicationId
+        : typeof row.id === "string"
+          ? row.id
+          : null;
+    // LifeOS gateway Directory payloads omit visibility; published rows are PUBLIC.
+    const visibility =
+      row.visibility === "PRIVATE"
+        ? "PRIVATE"
+        : row.visibility === "PUBLIC" || row.visibility == null
+          ? "PUBLIC"
+          : null;
     const publicationState =
       row.publicationState === "PUBLISHED" ||
       row.publicationState === "DRAFT" ||
@@ -267,7 +280,7 @@ export function parseLifeOSCatalogPayload(input: unknown): LifeOSCatalogApplicat
         ? row.publicationState
         : null;
     if (
-      typeof row.applicationId !== "string" ||
+      !applicationId ||
       typeof row.name !== "string" ||
       typeof row.version !== "string" ||
       typeof row.origin !== "string" ||
@@ -279,7 +292,7 @@ export function parseLifeOSCatalogPayload(input: unknown): LifeOSCatalogApplicat
       continue;
     }
     out.push({
-      applicationId: row.applicationId,
+      applicationId,
       name: row.name,
       version: row.version,
       origin: row.origin,

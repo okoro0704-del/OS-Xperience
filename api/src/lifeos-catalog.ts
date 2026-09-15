@@ -52,13 +52,17 @@ export class HttpLifeOSCatalog implements LifeOSCatalogPort {
         method: "GET",
         headers: { Accept: "application/json" },
       });
-      if (!response.ok) throw new Error(`LifeOS catalog request failed (${response.status}).`);
+      if (!response.ok) {
+        console.error(`LifeOS catalog request failed (${response.status}).`);
+        return [];
+      }
       const payload = (await response.json()) as unknown;
       return parseLifeOSCatalogPayload(payload).filter(isLifeOSDirectoryEligible);
     } catch (error) {
-      throw new Error(
+      console.error(
         `LifeOS catalog is unavailable: ${error instanceof Error ? error.message : "unknown error"}`,
       );
+      return [];
     }
   }
 

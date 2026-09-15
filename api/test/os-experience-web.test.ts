@@ -90,7 +90,8 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
       if (filePath.endsWith(".js") && apiPort) {
         const rewritten = body
           .toString("utf8")
-          .replaceAll("http://localhost:4100", `http://127.0.0.1:${apiPort}`);
+          .replaceAll("http://localhost:4100", `http://127.0.0.1:${apiPort}`)
+          .replaceAll("https://xperience-api-production-37ee.up.railway.app", `http://127.0.0.1:${apiPort}`);
         body = Buffer.from(rewritten);
       }
       const type = filePath.endsWith(".js")
