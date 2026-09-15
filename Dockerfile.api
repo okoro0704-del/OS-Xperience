@@ -1,0 +1,41 @@
+# Xperience API — Railway production image
+FROM node:20-bookworm-slim AS build
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY api/package.json api/
+COPY apps/os-experience/package.json apps/os-experience/
+COPY apps/xperience-console/package.json apps/xperience-console/
+COPY apps/xperience-mobile/package.json apps/xperience-mobile/
+COPY apps/web/package.json apps/web/
+COPY apps/demo-notes/package.json apps/demo-notes/
+COPY packages/contract/package.json packages/contract/
+COPY packages/runtime/package.json packages/runtime/
+COPY packages/sdk/package.json packages/sdk/
+COPY packages/xperience-contract/package.json packages/xperience-contract/
+COPY packages/xperience-sdk/package.json packages/xperience-sdk/
+COPY packages/xperience-ui/package.json packages/xperience-ui/
+
+RUN npm ci
+
+COPY . .
+
+RUN npm run build -w @digiconomy/xperience-contract \
+  && npm run build -w @digiconomy/xperience-sdk \
+  && node scripts/prisma-xperience.mjs generate \
+  && npm run build -w @digiconomy/xperience-api
+
+FROM node:20-bookworm-slim AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=4100
+
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/api ./api
+COPY --from=build /app/packages/xperience-contract ./packages/xperience-contract
+COPY --from=build /app/packages/xperience-sdk ./packages/xperience-sdk
+COPY --from=build /app/scripts ./scripts
+
+EXPOSE 4100
+CMD ["sh", "-c", "node scripts/prisma-xperience.mjs migrate && node api/dist/server.js"]

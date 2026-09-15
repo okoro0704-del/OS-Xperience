@@ -71,8 +71,17 @@ function AppGlyph({ app, compact = false }: { app: DirectoryApplicationView; com
   return <span className={`ox-app-glyph ox-tone-${app.category.toLowerCase()} ${compact ? "is-compact" : ""}`} aria-hidden="true">{initials(app.name)}</span>;
 }
 
-function ErrorPanel({ onRetry }: { onRetry: () => void }) {
-  return <section className="ox-state ox-error" role="alert"><span>!</span><h2>Something went wrong</h2><p>We couldn&apos;t load your experience right now.</p><button className="ox-button secondary" onClick={onRetry}>Try again</button></section>;
+function ErrorPanel({ message, onRetry }: { message?: string | null; onRetry: () => void }) {
+  return (
+    <section className="ox-state ox-error" role="alert" data-testid="error">
+      <span>!</span>
+      <h2>Something went wrong</h2>
+      <p>{message?.trim() || "We couldn't load your Experience right now."}</p>
+      <button className="ox-button secondary" onClick={onRetry} data-testid="retry">
+        Try again
+      </button>
+    </section>
+  );
 }
 
 function Skeletons({ count = 4 }: { count?: number }) {
@@ -404,7 +413,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
     <main className="ox-main">
       <div className="ox-topbar"><Brand /><div><button className="ox-icon-button" aria-label="Notifications"><Icon name="bell" /></button><button className="ox-avatar" aria-label="Open profile" onClick={() => setScreen("profile")}>{initials(userName)}</button></div></div>
-      {error && screen !== "experience" ? <ErrorPanel onRetry={() => void load()} /> : null}
+      {error && screen !== "experience" ? <ErrorPanel message={error} onRetry={() => void load()} /> : null}
 
       {!error && screen === "home" ? <div data-testid="home" className="ox-screen ox-home">
         <section className="ox-hero">

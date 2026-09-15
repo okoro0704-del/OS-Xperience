@@ -6,6 +6,9 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  VITE_XPERIENCE_API_URL = "https://xperience-api-production-37ee.up.railway.app"
+  VITE_XPERIENCE_USER_ID = "user-1"
+  VITE_XPERIENCE_USER_NAME = "Member"
 
 [[redirects]]
   from = "/*"
