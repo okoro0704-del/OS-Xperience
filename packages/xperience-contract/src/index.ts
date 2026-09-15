@@ -176,8 +176,10 @@ export type DirectoryCategory = (typeof DIRECTORY_CATEGORIES)[number];
 
 /** Deterministic category from declared capabilities — not a recommendation engine. */
 export function directoryCategory(capabilities: Capability[]): Exclude<DirectoryCategory, "All"> {
-  if (capabilities.includes("COMMERCE") || capabilities.includes("PAYMENTS")) return "Finance";
-  if (capabilities.includes("LIVE") || capabilities.includes("MESSAGING")) return "Lifestyle";
+  if (capabilities.includes("COMMERCE")) return "Commerce";
+  if (capabilities.includes("PAYMENTS")) return "Finance";
+  if (capabilities.includes("LIVE")) return "Creator";
+  if (capabilities.includes("MESSAGING")) return "Lifestyle";
   if (capabilities.includes("CAMERA") || capabilities.includes("DEVICE_BRIDGE")) return "Device";
   if (capabilities.includes("FILES")) return "Productivity";
   if (capabilities.includes("IDENTITY")) return "Identity";
@@ -382,3 +384,11 @@ export function isAllowedMessageOrigin(eventOrigin: string, applicationOrigin: s
 export interface ShellRegistryPort {
   resolveApplication(applicationId: string): Promise<{ applicationId: string; origin: string } | null>;
 }
+
+export {
+  parseExperienceUtterance,
+  utteranceDoesNotGrantAuthorization,
+  type ExperienceUtterance,
+  type ExperienceRouteCategory,
+} from "./experience-utterance.js";
+

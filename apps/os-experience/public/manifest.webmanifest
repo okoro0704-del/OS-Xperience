@@ -1,14 +1,21 @@
 {
   "name": "OS Experience",
   "short_name": "OS Experience",
-  "description": "Your digital life, your applications, one experience.",
+  "description": "Your Digital Life. Your Applications. One Experience.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "any",
-  "background_color": "#050b18",
-  "theme_color": "#070b14",
+  "background_color": "#05070f",
+  "theme_color": "#05070f",
   "icons": [
-    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
-  ]
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "lifestyle"],
+  "lang": "en"
 }

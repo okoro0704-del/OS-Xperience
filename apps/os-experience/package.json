@@ -7,15 +7,21 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
-    "preview": "vite preview --port 5176"
+    "preview": "vite preview --port 5176",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:android": "npx cap open android"
   },
   "dependencies": {
     "@digiconomy/xperience-contract": "*",
     "@digiconomy/xperience-sdk": "*",
+    "@digiconomy/xperience-ui": "*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },
   "devDependencies": {
+    "@capacitor/android": "^7.2.0",
+    "@capacitor/cli": "^7.2.0",
+    "@capacitor/core": "^7.2.0",
     "@types/react": "^19.0.12",
     "@types/react-dom": "^19.0.4",
     "@vitejs/plugin-react": "^4.3.4",

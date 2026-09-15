@@ -19,9 +19,11 @@ The consumer mobile app (`apps/xperience-mobile`) and consumer web app (`apps/os
 **LifeOS / Digiconomy Directory projection:** Eligible LifeOS verticals may appear in Directory through a thin read-only `LifeOSCatalogPort` (`LIFEOS_DIRECTORY_CATALOG_URL` or `LIFEOS_DIRECTORY_CATALOG_JSON`). Eligibility requires public visibility, published state, and valid HTTPS destinations. LifeOS remains the source of identity; OS Experience does not copy verticals into a second Application registry. Xperience-published rows win on ID collision. `ExperienceSelection.applicationId` is an opaque identity (no Application FK) so ecosystem apps can be experienced without duplicating ownership.
 
 **Product separation:**
-- **OS Experience** (`apps/os-experience`, `apps/xperience-mobile`) — consumer Home / Directory / My Experience
+- **OS Experience** (`apps/os-experience`, `apps/xperience-mobile`, shared `@digiconomy/xperience-ui`) — consumer Home / Directory / My Experience / Voice objective surface
 - **Xperience** (`apps/xperience-console`) — developer/admin registration and review
 - **OS Shell** (`apps/web`) — thin operating surface; remains a separate product and must not be confused with OS Experience consumer UI
+
+**Shared presentation:** Web/PWA and mobile consumers render the same `ExperienceApp` from `packages/xperience-ui` (design tokens + interaction language). OS Experience Android packaging uses Capacitor under `apps/os-experience` (`com.digiconomy.osexperience`), separate from OS Shell Android (`com.digiconomy.osshell`). iOS packaging is prepared via the same Capacitor config when a macOS/Xcode environment is available.
 
 
 Authentication is a provider boundary. Production resolves through the Trust ID-compatible provider and fails closed until that provider is connected. The development adapter is available only with both `NODE_ENV=development` and `XPERIENCE_DEV_AUTH=true`; it is not an identity system and never proves application control.

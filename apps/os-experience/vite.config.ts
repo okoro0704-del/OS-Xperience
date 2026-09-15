@@ -5,4 +5,10 @@ export default defineConfig({
   plugins: [react()],
   server: { port: 5176 },
   preview: { port: 5176 },
+  optimizeDeps: {
+    include: ["@digiconomy/xperience-contract", "@digiconomy/xperience-sdk"],
+  },
+  resolve: {
+    dedupe: ["react", "react-dom"],
+  },
 });

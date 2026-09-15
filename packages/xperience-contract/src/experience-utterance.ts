@@ -3,17 +3,31 @@
  * Interaction surface only — not authorization, not an AI planner, not a workflow backend.
  * Resolves natural phrases onto Directory / Experience actions.
  */
-import { DIRECTORY_CATEGORIES, type DirectoryCategory } from "./index.js";
+
+/** Mirrors Directory categories without circular imports from index. */
+export type ExperienceRouteCategory =
+  | "Creator"
+  | "Finance"
+  | "Lifestyle"
+  | "Education"
+  | "Health"
+  | "Development"
+  | "Commerce"
+  | "Identity"
+  | "Productivity"
+  | "Device"
+  | "Notifications"
+  | "General";
 
 export type ExperienceUtterance =
   | { kind: "show_experience" }
   | { kind: "open"; query: string }
   | { kind: "start_experience"; query: string }
   | { kind: "search"; query: string }
-  | { kind: "category"; category: Exclude<DirectoryCategory, "All" | "More"> }
+  | { kind: "category"; category: ExperienceRouteCategory }
   | { kind: "unresolved"; text: string };
 
-const CATEGORY_ALIASES: Record<string, Exclude<DirectoryCategory, "All" | "More">> = {
+const CATEGORY_ALIASES: Record<string, ExperienceRouteCategory> = {
   finance: "Finance",
   financial: "Finance",
   money: "Finance",
@@ -101,8 +115,4 @@ export function parseExperienceUtterance(input: string): ExperienceUtterance {
 
 export function utteranceDoesNotGrantAuthorization(): true {
   return true;
-}
-
-export function directoryCategoryLabels(): readonly DirectoryCategory[] {
-  return DIRECTORY_CATEGORIES;
 }

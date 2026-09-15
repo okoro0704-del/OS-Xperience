@@ -12,6 +12,7 @@
   "dependencies": {
     "@digiconomy/xperience-contract": "*",
     "@digiconomy/xperience-sdk": "*",
+    "@digiconomy/xperience-ui": "*",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"
   },

@@ -81,11 +81,18 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
   await svc.transition(admin, "app.web", "APPROVED");
   await svc.transition(admin, "app.web", "PUBLISHED");
 
+  let apiPort = 0;
   const ui = createServer(async (req, res) => {
     const url = req.url === "/" ? "/index.html" : (req.url ?? "/index.html");
     try {
       const filePath = path.join(distDir, decodeURIComponent(url.split("?")[0]!));
-      const body = await readFile(filePath);
+      let body = await readFile(filePath);
+      if (filePath.endsWith(".js") && apiPort) {
+        const rewritten = body
+          .toString("utf8")
+          .replaceAll("http://localhost:4100", `http://127.0.0.1:${apiPort}`);
+        body = Buffer.from(rewritten);
+      }
       const type = filePath.endsWith(".js")
         ? "text/javascript"
         : filePath.endsWith(".css")
@@ -108,13 +115,15 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
       lifeosCatalog: catalog,
     }),
   );
-  const apiPort = await listen(api);
+  apiPort = await listen(api);
 
   const browser = await chromium.launch({ headless: true });
   try {
-    const page = await browser.newPage();
-    await page.goto(`http://127.0.0.1:${uiPort}/`, { waitUntil: "domcontentloaded" });
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(`http://127.0.0.1:${uiPort}/`, { waitUntil: "networkidle" });
     assert.equal(await page.title(), "OS Experience");
+    await page.waitForSelector('[data-testid="os-experience"]');
+    await page.waitForSelector('[data-testid="home"]', { timeout: 15000 });
 
     const journey = await page.evaluate(`(async () => {
       const API = "http://127.0.0.1:${apiPort}";
@@ -134,7 +143,8 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
       }
       const homeBrand = document.body.innerText.includes("OS Experience");
       const shellLegacy = /Find an app|OS Shell 2\\.0\\.1|Not a primitive/i.test(document.body.innerText);
-      const modernHome = /Your Digital Life|Explore Directory|Continue Your Experience|Your Experience is waiting/i.test(document.body.innerText);
+      const modernHome = /Your Digital Life|Explore Directory|Continue Your Experience|Explore Digiconomy|YOUR OS EXPERIENCE/i.test(document.body.innerText);
+      const hasVoiceNav = Boolean(document.querySelector('[data-testid="nav-voice"]'));
       const search = await req("GET", "/v1/directory?q=FundzMan");
       await req("POST", "/v1/experience/mr.fundzman");
       const mine = await req("GET", "/v1/experience");
@@ -147,6 +157,7 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
         homeBrand,
         shellLegacy,
         modernHome,
+        hasVoiceNav,
         searchHit: search.applications[0]?.id,
         mine: mine.experiences.length,
         after: after.experiences.length,
@@ -157,6 +168,7 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
     assert.equal(journey.homeBrand, true);
     assert.equal(journey.shellLegacy, false);
     assert.equal(journey.modernHome, true);
+    assert.equal(journey.hasVoiceNav, true);
     assert.equal(journey.searchHit, "mr.fundzman");
     assert.equal(journey.mine, 1);
     assert.equal(journey.after, 0);
