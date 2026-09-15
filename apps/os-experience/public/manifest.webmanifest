@@ -1,0 +1,14 @@
+{
+  "name": "OS Experience",
+  "short_name": "OS Experience",
+  "description": "Your digital life, your applications, one experience.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#050b18",
+  "theme_color": "#070b14",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
