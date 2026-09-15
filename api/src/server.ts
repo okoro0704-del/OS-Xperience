@@ -53,7 +53,7 @@ function allowedOrigins(): Set<string> {
   return new Set(
     (
       process.env.XPERIENCE_CONSOLE_ORIGINS ??
-      "http://localhost:5174,http://localhost:5175,http://localhost:5176,https://xperience.getlifeos.app,https://os-xperience.netlify.app"
+      "http://localhost:5174,http://localhost:5175,http://localhost:5176,https://localhost,capacitor://localhost,https://xperience.getlifeos.app,https://os-xperience.netlify.app"
     )
       .split(",")
       .map((s) => s.trim())

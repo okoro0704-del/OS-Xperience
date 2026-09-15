@@ -77,16 +77,15 @@ function AppGlyph({ app, compact = false }: { app: DirectoryApplicationView; com
   return <span className={`ox-app-glyph ox-tone-${app.category.toLowerCase()} ${compact ? "is-compact" : ""}`} aria-hidden="true">{initials(app.name)}</span>;
 }
 
-function ErrorPanel({ message, onRetry }: { message?: string | null; onRetry: () => void }) {
+function ErrorBanner({ message, onRetry }: { message?: string | null; onRetry: () => void }) {
   return (
-    <section className="ox-state ox-error" role="alert" data-testid="error">
+    <div className="ox-error-banner" role="alert" data-testid="error">
       <span>!</span>
-      <h2>Something went wrong</h2>
       <p>{message?.trim() || "We couldn't load your Experience right now."}</p>
-      <button className="ox-button secondary" onClick={onRetry} data-testid="retry">
+      <button className="ox-button secondary compact" onClick={onRetry} data-testid="retry">
         Try again
       </button>
-    </section>
+    </div>
   );
 }
 
@@ -175,7 +174,6 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    setError(null);
     try {
       const [directoryResult, featuredResult, membershipResult, me] = await Promise.all([
         api.listDirectory(),
@@ -187,6 +185,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setFeatured(featuredResult.applications);
       setMemberships(membershipResult.experiences);
       setParticipant(me);
+      setError(null);
     } catch (reason) {
       setError(reason instanceof XperienceApiError ? reason.message : "The service could not be reached.");
     } finally {
@@ -201,14 +200,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
   useEffect(() => {
     if (typeof props.online === "boolean") {
       setOffline(!props.online);
-      if (props.online && error) void load();
       return;
     }
-    const sync = () => {
-      const online = navigator.onLine;
-      setOffline(!online);
-      if (online && error) void load();
-    };
+    const sync = () => setOffline(!navigator.onLine);
     sync();
     window.addEventListener("online", sync);
     window.addEventListener("offline", sync);
@@ -216,7 +210,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
       window.removeEventListener("online", sync);
       window.removeEventListener("offline", sync);
     };
-  }, [props.online, error, load]);
+  }, [props.online]);
+
+  const wasOfflineRef = useRef(false);
+  useEffect(() => {
+    if (typeof props.online !== "boolean") return;
+    if (props.online && wasOfflineRef.current) void load();
+    wasOfflineRef.current = !props.online;
+  }, [props.online, load]);
 
   useEffect(() => {
     const query = window.matchMedia("(min-width: 960px)");
@@ -504,38 +505,29 @@ export function ExperienceApp(props: ExperienceAppProps) {
     <main className="ox-main">
       <div className="ox-topbar"><Brand /><div><button className="ox-icon-button" aria-label="Notifications"><Icon name="bell" /></button><button className="ox-avatar" aria-label="Open profile" onClick={() => navigate("profile")}>{initials(userName)}</button></div></div>
       {offline ? <div className="ox-offline-banner" role="status">You&apos;re offline. Directory needs a connection — reconnect and try again.</div> : null}
-      {error && screen !== "experience" ? <ErrorPanel message={error} onRetry={() => void load()} /> : null}
+      {error && screen !== "experience" ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
-      {!error && screen === "home" ? <div data-testid="home" className="ox-screen ox-home">
-        <section className="ox-hero">
-          <div><small>YOUR OS EXPERIENCE</small><h1>Hello, {userName}.</h1><p>Your Digital Life. Your Applications. One Experience.</p>
-            <form data-testid="home-search" className="ox-objective" onSubmit={submitObjective}>
-              <Icon name="search" /><input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="What would you like to do?" aria-label="Your objective" />
-              <button type="button" aria-label="Use voice" onClick={() => navigate("voice")}><Icon name="voice" /></button>
-              <button type="submit">Go</button>
-            </form>
-          </div>
-          <div className="ox-orbit" aria-hidden="true"><i /><span>OS</span></div>
-        </section>
+      {screen === "home" ? <div data-testid="home" className="ox-screen ox-home">
+        <form data-testid="home-search" className="ox-home-search ox-objective" onSubmit={submitObjective}>
+          <Icon name="search" />
+          <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="What would you like to do?" aria-label="Your objective" />
+          <button type="button" aria-label="Use voice" onClick={() => navigate("voice")}><Icon name="voice" /></button>
+          <button type="submit">Go</button>
+        </form>
 
         <section className="ox-section">
           <div className="ox-section-heading"><div><small>PICK UP WHERE YOU LEFT OFF</small><h2>Continue Your Experience</h2></div><button onClick={() => navigate("my-experience")}>See all <span>→</span></button></div>
-          {loading ? <Skeletons count={3} /> : continueItems.length ? <div className="ox-continue-row">{continueItems.slice(0, 4).map((item) => <button key={item.applicationId} onClick={() => void openApplication(item.application)}><AppGlyph compact app={item.application} /><span><strong>{item.application.name}</strong><small>{item.application.category}</small></span><em>Open →</em></button>)}</div> : <div className="ox-inline-empty"><p>Your active applications will appear here.</p><button onClick={() => navigate("directory")}>Explore Directory</button></div>}
+          {loading ? <Skeletons count={4} /> : continueItems.length ? <div className="ox-continue-row">{continueItems.slice(0, 4).map((item) => <button key={item.applicationId} onClick={() => void openApplication(item.application)}><AppGlyph compact app={item.application} /><span><strong>{item.application.name}</strong><small>{item.application.category}</small></span><em>Open →</em></button>)}</div> : <div className="ox-inline-empty"><p>Your active applications will appear here.</p><button onClick={() => navigate("directory")}>Explore Directory</button></div>}
         </section>
 
         <section className="ox-section">
-          <div className="ox-section-heading"><div><small>DISCOVER</small><h2>Explore Digiconomy</h2></div><button data-testid="explore-directory" onClick={() => navigate("directory")}>Explore all <span>→</span></button></div>
-          <div className="ox-category-cloud">{DIRECTORY_CATEGORIES.filter((item) => item !== "All").map((item) => <button key={item} onClick={() => { setCategory(item); navigate("directory"); }}>{item}</button>)}</div>
-        </section>
-
-        <section className="ox-section">
-          <div className="ox-section-heading"><div><small>FROM THE DIRECTORY</small><h2>Featured applications</h2></div></div>
-          {renderGrid(featured)}
-          {!loading && featured.length === 0 ? <p className="ox-empty-copy">No featured applications are available right now.</p> : null}
+          <div className="ox-section-heading"><div><small>FOR YOU</small><h2>Recommended for you</h2></div><button data-testid="explore-directory" onClick={() => navigate("directory")}>Explore all <span>→</span></button></div>
+          {renderGrid(featured.slice(0, 4))}
+          {!loading && featured.length === 0 ? <p className="ox-empty-copy">No recommended applications are available right now.</p> : null}
         </section>
       </div> : null}
 
-      {!error && screen === "directory" ? <div data-testid="directory" className="ox-screen">
+      {screen === "directory" ? <div data-testid="directory" className="ox-screen">
         <PageHeader eyebrow="DISCOVER YOUR DIGITAL WORLD" title="Directory" copy="Browse published applications and shape an experience that is yours." />
         <form className="ox-search" onSubmit={searchApplications}><Icon name="search" /><input data-testid="search-input" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search applications" /><button>Search</button></form>
         <div className="ox-filter-row" aria-label="Directory categories">{DIRECTORY_CATEGORIES.map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}</button>)}</div>
@@ -543,14 +535,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
         {!loading && filteredDirectory.length === 0 ? <div className="ox-inline-empty"><p>No applications match this category.</p><button onClick={() => setCategory("All")}>Show all</button></div> : null}
       </div> : null}
 
-      {!error && screen === "search" ? <div data-testid="search" className="ox-screen">
+      {screen === "search" ? <div data-testid="search" className="ox-screen">
         <PageHeader eyebrow="DIRECTORY SEARCH" title={searchQuery ? `Results for “${searchQuery}”` : "Search applications"} copy={`${searchResults.length} result${searchResults.length === 1 ? "" : "s"} from the directory.`} />
         <form className="ox-search" onSubmit={searchApplications}><Icon name="search" /><input data-testid="search-input" autoFocus value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search applications" /><button>Search</button></form>
         {renderGrid(searchResults)}
         {!loading && searchResults.length === 0 ? <div className="ox-inline-empty"><p>No matching applications were found.</p><button onClick={() => { setSearchText(""); setSearchQuery(""); navigate("directory"); }}>Browse Directory</button></div> : null}
       </div> : null}
 
-      {!error && screen === "detail" ? <div className="ox-screen ox-detail">
+      {screen === "detail" ? <div className="ox-screen ox-detail">
         <BackButton />
         {selected ? <section className="ox-detail-card">
           <div className="ox-detail-lead"><AppGlyph app={selected} /><div><small>{selected.category}</small><h1>{selected.name}</h1><p>{selected.description || "No public description was provided."}</p></div></div>
@@ -559,7 +551,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         </section> : <div className="ox-inline-empty"><p>Select an application from Directory.</p></div>}
       </div> : null}
 
-      {!error && screen === "my-experience" ? <div data-testid="my-experience" className="ox-screen">
+      {screen === "my-experience" ? <div data-testid="my-experience" className="ox-screen">
         <PageHeader eyebrow="YOUR DIGITAL SPACE" title="My Experience" copy="The applications you have chosen, together in one place." />
         <div className="ox-filter-row">{(["All", "Active", "Paused", "Recently Used"] as MembershipFilter[]).map((item) => <button className={membershipFilter === item ? "active" : ""} key={item} onClick={() => setMembershipFilter(item)}>{item}</button>)}</div>
         {loading ? <Skeletons /> : filteredMemberships.length ? <div className="ox-memberships">{filteredMemberships.map((item) => <article key={item.applicationId}>
@@ -569,7 +561,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         </article>)}</div> : <section className="ox-state"><span>◇</span><h2>Your Experience is ready to grow</h2><p>Add an application from Directory to see it here.</p><button className="ox-button primary" onClick={() => navigate("directory")}>Explore Directory</button></section>}
       </div> : null}
 
-      {!error && screen === "profile" ? <div className="ox-screen">
+      {screen === "profile" ? <div className="ox-screen">
         <PageHeader eyebrow="PARTICIPANT" title="Profile" copy="Your participant information for this OS Experience." />
         <section className="ox-profile-card"><span className="ox-profile-avatar">{initials(participant?.displayName || userName)}</span><div><h2>{participant?.displayName || userName}</h2><p>{participant?.email || "No email provided"}</p></div><dl><div><dt>Participant ID</dt><dd>{participant?.id || userId}</dd></div><div><dt>Role</dt><dd>{participant?.role || "USER"}</dd></div></dl></section>
       </div> : null}
