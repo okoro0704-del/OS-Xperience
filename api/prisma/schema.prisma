@@ -66,7 +66,6 @@ model Application {
  evidence VerificationEvidence[]
  reviews Review[]
  publications Publication[]
- audit AuditEvent[]
  @@index([developerId, state])
 }
 model ExperienceSelection {
@@ -152,6 +151,7 @@ model Publication {
 }
 model AuditEvent {
  id String @id @default(cuid())
+ // Opaque application identity (Xperience or LifeOS). No FK — same as ExperienceSelection.
  applicationId String?
  actorId String
  actorType String
@@ -160,7 +160,6 @@ model AuditEvent {
  newState String?
  reason String?
  detail Json?
- application Application? @relation(fields: [applicationId], references: [id])
  createdAt DateTime @default(now())
  @@index([applicationId, createdAt])
 }
