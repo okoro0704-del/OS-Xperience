@@ -1,26 +1,94 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
+import {
+  DIRECTORY_CATEGORIES,
+  type DirectoryApplicationView,
+  type ExperienceMembershipView,
+} from "@digiconomy/xperience-contract";
+import { createXperienceApiClient, XperienceApiError, type XperienceApiClient } from "@digiconomy/xperience-sdk";
 import "./styles.css";
 
-type AppItem = { name: string; category: string; icon: string; accent: string; description: string; art: string };
-type InstallPrompt = Event & { prompt: () => Promise<void>; userChoice: Promise<{ outcome: "accepted" | "dismissed" }> };
-const apps: AppItem[] = [
-  { name: "LifeOS", category: "Social & Lifestyle", icon: "⌁", accent: "green", description: "Your life. Connected. Productive. Elevated.", art: "forest" },
-  { name: "Mr FundzMan", category: "Creator", icon: "♛", accent: "red", description: "Music, content, products and more.", art: "sunset" },
-  { name: "FinanceOS", category: "Finance", icon: "₿", accent: "gold", description: "Your money. Your freedom.", art: "gold" },
-  { name: "HealthOS", category: "Health & Wellness", icon: "♥", accent: "pink", description: "A healthier, better you every day.", art: "palm" },
-  { name: "EduOS", category: "Education", icon: "◆", accent: "blue", description: "Learn. Build. Grow. Without limits.", art: "blue" },
-];
-const categories = ["All", "Creator", "Finance", "Lifestyle", "Education", "Health", "Development", "Commerce"];
+const API_BASE = import.meta.env.VITE_XPERIENCE_API_URL ?? "http://localhost:4100";
+const USER_ID = import.meta.env.VITE_XPERIENCE_USER_ID ?? "user-1";
+const USER_NAME = import.meta.env.VITE_XPERIENCE_USER_NAME ?? "Member";
+type App = DirectoryApplicationView;
+
 function Logo() { return <span className="logo-mark"><span /></span>; }
 function Icon({ children }: { children: string }) { return <span className="nav-icon">{children}</span>; }
-function AppIcon({ item, small = false }: { item: AppItem; small?: boolean }) { return <span className={`app-art-icon ${item.accent} ${small ? "small" : ""}`}>{item.icon}</span>; }
-function CompactCard({ item }: { item: AppItem }) { return <article className="compact-card"><AppIcon item={item} small /><div className="compact-copy"><strong>{item.name}</strong><span>{item.category}</span></div><i className="online-dot" /><button className="open-btn">Open</button><button className="more" aria-label="More">⋮</button></article>; }
-function DirectoryCard({ item }: { item: AppItem }) { return <article className={`directory-card ${item.art}`}><div className="card-shade" /><span className="spark">+</span><AppIcon item={item} /><div className="directory-copy"><h3>{item.name}</h3><span>{item.category}</span><p>{item.description}</p></div><button className="experience-btn">Experience</button></article>; }
-function BottomNav({ active = "Home" }: { active?: string }) { return <nav className="bottom-nav">{[["⌂", "Home"], ["▱", "Directory"], ["◉", "My Experience"], ["♙", "Profile"]].map(([icon, label]) => <div className={active === label ? "active" : ""} key={label}><Icon>{icon}</Icon><small>{label}</small></div>)}<button className="voice-fab">●</button></nav>; }
-function MobileSearch() { return <section className="mobile-panel search-panel"><header><button>‹</button><strong>Search</strong></header><div className="mobile-search"><span>⌕</span><b>Mr FundzMan</b><span>×</span><button>♩</button></div><div className="mobile-pills"><b>All</b><span>Apps</span><span>Creators</span><span>Services</span></div><h4>Top Results</h4>{[apps[1], { ...apps[1], name: "Mr FundzMan Pro", description: "Advanced tools for creators." }, { ...apps[1], name: "FundzStudio", category: "Service", icon: "A" }, { ...apps[0], name: "BeatMarket", category: "Service", icon: "⌂" }].map((item) => <div className="result-row" key={item.name}><AppIcon item={item} small /><div><strong>{item.name}</strong><small>{item.category}<br />{item.description}</small></div><button className="experience-btn">{item.name.includes("Studio") || item.name.includes("Beat") ? "Add" : "Experience"}</button></div>)}<BottomNav active="Directory" /></section>; }
-function MobileDetails() { return <section className="mobile-panel detail-panel"><header><button>‹</button><span /><button>•••</button></header><div className="detail-cover sunset"><AppIcon item={apps[1]} /></div><div className="detail-sheet"><h3>Mr FundzMan <em>✓</em></h3><small>Creator · Music, Content, Products</small><button className="add-btn">Add to Experience</button><div className="tabs"><b>Overview</b><span>Features</span><span>Screenshots</span><span>Details</span></div><p>Enter the world of Mr FundzMan — music, content, community and more. Experience exclusive releases, live sessions, courses and real tools for your journey.</p><div className="detail-lines"><span>◉ Website <b>https://mrfundzman.com ↗</b></span><span>ⓘ Support <b>support@mrfundzman.com ↗</b></span><span>▣ Category <b>Creator</b></span><span>▧ Available On <b>OS Xperience</b></span></div></div><BottomNav active="Directory" /></section>; }
-function MobileVoice() { return <section className="mobile-panel voice-panel"><header><button>‹</button><strong>Voice Assistant</strong><button>×</button></header><div className="voice-orb"><span>))))</span></div><h3>Listening...</h3><p>Tell me what you want to do</p><small>Example commands</small>{["Open Mr FundzMan", "Add LifeOS to my experience", "Search for finance apps", "Show my experience", "Open mybrandOS", "Launch HealthOS"].map((x) => <div className="command" key={x}>◌ <span>“{x}”</span></div>)}<button className="stop-btn">■</button></section>; }
-function MobileExperience() { return <section className="mobile-panel experience-panel"><header><button>‹</button><strong>My Experience</strong><button>•••</button></header><div className="mobile-pills"><b>All</b><span>Active</span><span>Paused</span><span>Recently Used</span></div>{apps.slice(0, 4).concat([{ ...apps[0], name: "TravelOS", icon: "✈", accent: "blue" }, { ...apps[0], name: "BuildOS", icon: "◉", accent: "outline" }]).map((item, i) => <div className="experience-row" key={item.name}><AppIcon item={item} small /><div><strong>{item.name}</strong><small className={i === 3 || i === 5 ? "paused" : "active-text"}>{i === 3 || i === 5 ? "Paused" : "Active"}</small></div><button className="open-btn">{i === 3 || i === 5 ? "Resume" : "Open"}</button><span>⋮</span></div>)}<BottomNav active="My Experience" /></section>; }
-function App() { const [category, setCategory] = useState("All"); const [query, setQuery] = useState(""); const [installPrompt, setInstallPrompt] = useState<InstallPrompt | null>(null); const visible = apps.filter((x) => category === "All" || x.category.includes(category)); useEffect(() => { void navigator.serviceWorker?.register("/sw.js"); const onPrompt = (event: Event) => { event.preventDefault(); setInstallPrompt(event as InstallPrompt); }; window.addEventListener("beforeinstallprompt", onPrompt); return () => window.removeEventListener("beforeinstallprompt", onPrompt); }, []); async function install() { if (!installPrompt) return; await installPrompt.prompt(); setInstallPrompt(null); } return <main className="page">{installPrompt ? <aside className="install-banner"><Logo /><span><strong>Install OS Experience</strong><small>Keep your experience one tap away.</small></span><button onClick={() => void install()}>Install</button><button className="dismiss" onClick={() => setInstallPrompt(null)}>×</button></aside> : null}<div className="desktop-shell"><aside className="sidebar"><div className="brand"><Logo /><strong>OS Experience</strong></div><nav className="side-nav">{[["⌂", "Home"], ["▱", "Directory"], ["▣", "My Experience"], ["♙", "Profile"]].map(([icon, label], i) => <button className={i === 0 ? "selected" : ""} key={label}><Icon>{icon}</Icon>{label}</button>)}</nav><div className="side-promo"><strong>Your Digital Life<br />Your Way</strong><div className="energy-globe" /></div></aside><section className="home"><header className="hero"><div><h1>Good afternoon, Member <span>👋</span></h1><p>Your Digital Life. Your Applications. One Experience.</p></div><div className="hero-art"><div className="planet planet-one" /><div className="planet planet-two" /><strong>A more open<br />digital world.</strong><small>Discover. Experience.<br />Create. Belong.</small></div><div className="hero-actions"><button>♧<i /></button><span>M</span></div></header><div className="search-bar"><span>⌕</span><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search applications, creators, services..." /><button>♩</button></div><section className="section compact-section"><div className="section-heading"><h2>Continue Your Experience</h2><a>See All →</a></div><div className="compact-grid">{apps.slice(0, 4).map((item) => <CompactCard item={item} key={item.name} />)}</div></section><section className="section directory-section"><div className="section-heading"><h2>Explore the Digiconomy</h2><a>See All →</a></div><div className="category-row">{categories.map((x) => <button className={category === x ? "active" : ""} onClick={() => setCategory(x)} key={x}>{x}</button>)}<button>More⌄</button></div><div className="directory-grid">{visible.map((item) => <DirectoryCard item={item} key={item.name} />)}</div></section></section></div><div className="mobile-strip"><MobileSearch /><MobileDetails /><MobileVoice /><MobileExperience /></div><footer><div><Logo /><strong>OS Experience</strong></div><span>One OS. Every Experience. The Digiconomy.</span><span>Discover. Add. Experience. Your Digital Life, Your Way.</span></footer></main>; }
+function initials(name: string) { return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "A"; }
+function tone(app: App) { return app.category === "Finance" ? "gold" : app.category === "Lifestyle" ? "green" : app.category === "Identity" ? "blue" : "pink"; }
+function AppIcon({ app, small = false }: { app: App; small?: boolean }) { return <span className={`app-art-icon ${tone(app)} ${small ? "small" : ""}`}>{initials(app.name)}</span>; }
+
+function State({ loading, error, empty, onRetry, onExplore }: { loading: boolean; error: string | null; empty: boolean; onRetry: () => void; onExplore: () => void }) {
+  if (loading) return <div className="state-panel"><strong>Loading eligible applications…</strong></div>;
+  if (error) return <div className="state-panel error"><strong>Portal unavailable</strong><p>{error}</p><button className="experience-btn" onClick={onRetry}>Retry</button></div>;
+  if (empty) return <div className="state-panel"><strong>No eligible applications yet</strong><p>Published applications from the Portal will appear here when available.</p><button className="experience-btn" onClick={onExplore}>Explore Directory</button></div>;
+  return null;
+}
+
+function CompactCard({ app, onOpen, onSelect }: { app: App; onOpen: (app: App) => void; onSelect: (app: App) => void }) {
+  return <article className="compact-card" onClick={() => onSelect(app)}><AppIcon app={app} small /><div className="compact-copy"><strong>{app.name}</strong><span>{app.category}</span></div><i className="online-dot" /><button className="open-btn" onClick={(event) => { event.stopPropagation(); onOpen(app); }}>Open</button><button className="more" aria-label={`More options for ${app.name}`} onClick={(event) => event.stopPropagation()}>⋮</button></article>;
+}
+
+function DirectoryCard({ app, onExperience, onOpen, onSelect }: { app: App; onExperience: (app: App) => void; onOpen: (app: App) => void; onSelect: (app: App) => void }) {
+  return <article className="directory-card forest" onClick={() => onSelect(app)}><div className="card-shade" /><span className="spark">+</span><AppIcon app={app} /><div className="directory-copy"><h3>{app.name}</h3><span>{app.category}</span><p>{app.description || "Published application in the Digiconomy."}</p></div><button className="experience-btn" onClick={(event) => { event.stopPropagation(); app.experienced ? onOpen(app) : onExperience(app); }}>{app.experienced ? "Open" : "Experience"}</button></article>;
+}
+
+function BottomNav({ active = "Home", onNavigate }: { active?: string; onNavigate: (tab: string) => void }) {
+  return <nav className="bottom-nav">{[["⌂", "Home"], ["▱", "Directory"], ["◉", "My Experience"], ["♙", "Profile"]].map(([icon, label]) => <button className={active === label ? "active" : ""} onClick={() => onNavigate(label)} key={label}><Icon>{icon}</Icon><small>{label}</small></button>)}<button className="voice-fab" aria-label="Voice assistant">●</button></nav>;
+}
+
+function MobileSearch({ apps, onOpen, onNavigate }: { apps: App[]; onOpen: (app: App) => void; onNavigate: (tab: string) => void }) {
+  return <section className="mobile-panel search-panel"><header><button onClick={() => onNavigate("Home")}>‹</button><strong>Search</strong></header><div className="mobile-search"><span>⌕</span><b>{apps[0]?.name || "Search applications"}</b><span>×</span><button aria-label="Voice search">♩</button></div><div className="mobile-pills"><b>All</b><span>Apps</span><span>Creators</span><span>Services</span></div><h4>Eligible applications</h4>{apps.slice(0, 4).map((app) => <div className="result-row" key={app.id}><AppIcon app={app} small /><div><strong>{app.name}</strong><small>{app.category}<br />{app.description || "Published application"}</small></div><button className="experience-btn" onClick={() => onOpen(app)}>Open</button></div>)}{apps.length === 0 ? <p className="muted-copy">No search results from the Portal.</p> : null}<BottomNav active="Directory" onNavigate={onNavigate} /></section>;
+}
+
+function MobileExperience({ mine, onOpen, onNavigate }: { mine: ExperienceMembershipView[]; onOpen: (app: App) => void; onNavigate: (tab: string) => void }) {
+  return <section className="mobile-panel experience-panel"><header><button onClick={() => onNavigate("Home")}>‹</button><strong>My Experience</strong><button aria-label="More">•••</button></header><div className="mobile-pills"><b>All</b><span>Active</span><span>Paused</span><span>Recently Used</span></div>{mine.map((item) => <div className="experience-row" key={item.applicationId}><AppIcon app={item.application} small /><div><strong>{item.application.name}</strong><small className={item.status === "ACTIVE" ? "active-text" : "paused"}>{item.status}</small></div><button className="open-btn" onClick={() => onOpen(item.application)}>Open</button><span>⋮</span></div>)}{mine.length === 0 ? <p className="muted-copy">Your Experience is empty. Add an eligible application from Directory.</p> : null}<BottomNav active="My Experience" onNavigate={onNavigate} /></section>;
+}
+
+function App() {
+  const api = useMemo<XperienceApiClient>(() => createXperienceApiClient({ baseUrl: API_BASE, actor: `USER:${USER_ID}`, email: `${USER_ID}@xperience.local`, displayName: USER_NAME }), []);
+  const [directory, setDirectory] = useState<App[]>([]);
+  const [mine, setMine] = useState<ExperienceMembershipView[]>([]);
+  const [category, setCategory] = useState("All");
+  const [query, setQuery] = useState("");
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [installPrompt, setInstallPrompt] = useState<(Event & { prompt: () => Promise<void> }) | null>(null);
+  const [selected, setSelected] = useState<App | null>(null);
+
+  async function load() {
+    setLoading(true); setError(null);
+    try {
+      const [directoryResult, experienceResult] = await Promise.all([
+        api.listDirectory({ q: search || undefined, category: category === "All" ? undefined : category }),
+        api.listMyExperience(),
+      ]);
+      setDirectory(directoryResult.applications); setMine(experienceResult.experiences);
+    } catch (err) {
+      setDirectory([]); setMine([]); setError(err instanceof XperienceApiError ? err.message : "The Portal could not be reached.");
+    } finally { setLoading(false); }
+  }
+  useEffect(() => { void load(); }, [api, category, search]);
+  useEffect(() => { void navigator.serviceWorker?.register("/sw.js"); const onPrompt = (event: Event) => { event.preventDefault(); setInstallPrompt(event as Event & { prompt: () => Promise<void> }); }; window.addEventListener("beforeinstallprompt", onPrompt); return () => window.removeEventListener("beforeinstallprompt", onPrompt); }, []);
+  async function experience(app: App) { setBusy(app.id); setError(null); try { await api.startExperience(app.id); await load(); } catch (err) { setError(err instanceof Error ? err.message : "Could not add this application to your Experience."); } finally { setBusy(null); } }
+  async function open(app: App) {
+    if (!app.experienced) { await experience(app); return; }
+    if (app.experienceStatus === "UNAVAILABLE") { setError(`${app.name} is no longer available from the Portal.`); return; }
+    setBusy(app.id); setError(null);
+    try {
+      const destination = await api.openExperience(app.id);
+      window.open(destination.embedUrl, "_blank", "noopener,noreferrer");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Could not open ${app.name}.`);
+    } finally { setBusy(null); }
+  }
+  const continueItems = mine.map((item) => item.application).slice(0, 4);
+  const categoryOptions = ["All", ...DIRECTORY_CATEGORIES.filter((value) => value !== "All")];
+  return <main className="page">{installPrompt ? <aside className="install-banner"><Logo /><span><strong>Install OS Experience</strong><small>Keep your experience one tap away.</small></span><button onClick={() => { void installPrompt.prompt(); setInstallPrompt(null); }}>Install</button><button className="dismiss" onClick={() => setInstallPrompt(null)}>×</button></aside> : null}<div className="desktop-shell"><aside className="sidebar"><div className="brand"><Logo /><strong>OS Experience</strong></div><nav className="side-nav">{[["⌂", "Home"], ["▱", "Directory"], ["▣", "My Experience"], ["♙", "Profile"]].map(([icon, label], i) => <button className={i === 0 ? "selected" : ""} key={label}><Icon>{icon}</Icon>{label}</button>)}</nav><div className="side-promo"><strong>Your Digital Life<br />Your Way</strong><div className="energy-globe" /></div></aside><section className="home"><header className="hero"><div><h1>Good afternoon, {USER_NAME} <span>👋</span></h1><p>Your Digital Life. Your Applications. One Experience.</p></div><div className="hero-art"><div className="planet planet-one" /><div className="planet planet-two" /><strong>A more open<br />digital world.</strong><small>Discover. Experience.<br />Create. Belong.</small></div><div className="hero-actions"><button aria-label="Notifications">♧<i /></button><span>{initials(USER_NAME).slice(0, 1)}</span></div></header><form className="search-bar" onSubmit={(event) => { event.preventDefault(); setSearch(query.trim()); }}><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search applications, creators, services..." /><button type="submit">♩</button></form><section className="section compact-section"><div className="section-heading"><h2>Continue Your Experience</h2><a>See All →</a></div>{continueItems.length ? <div className="compact-grid">{continueItems.map((app) => <CompactCard app={app} onOpen={open} onSelect={setSelected} key={app.id} />)}</div> : <State loading={loading} error={error} empty={!loading && !error} onRetry={() => void load()} onExplore={() => setSearch("")} />}</section><section className="section directory-section"><div className="section-heading"><h2>Explore the Digiconomy</h2><a>See All →</a></div><div className="category-row">{categoryOptions.map((item) => <button className={category === item ? "active" : ""} onClick={() => setCategory(item)} key={item}>{item}</button>)}<button>More⌄</button></div><State loading={loading} error={error} empty={!loading && !error && directory.length === 0} onRetry={() => void load()} onExplore={() => setSearch("")} /><div className="directory-grid">{directory.map((app) => <DirectoryCard app={app} onExperience={experience} onOpen={open} onSelect={setSelected} key={app.id} />)}</div>{busy ? <small className="busy-copy">Updating your Experience…</small> : null}</section></section></div><div className="mobile-strip"><MobileSearch apps={directory} onOpen={open} onNavigate={() => undefined} /><section className="mobile-panel detail-panel"><header><button aria-label="Back" onClick={() => setSelected(null)}>‹</button><strong>{selected?.name || "Application details"}</strong><button aria-label="More">•••</button></header><div className="detail-sheet">{selected ? <><h3>{selected.name}</h3><small>{selected.category} · v{selected.version}</small><p>{selected.description || "No public description was provided by the Portal."}</p><div className="detail-lines"><span>Origin <b>{selected.origin}</b></span><span>Public application <b>{selected.productionUrl}</b></span><span>Publication <b>{selected.publicationState}</b></span><span>Developer <b>{selected.developerName || "Not provided"}</b></span></div><button className="add-btn" onClick={() => open(selected)}>{selected.experienced ? "Open application" : "Add to Experience"}</button></> : <p>Select an application from Directory to inspect its canonical metadata and launch destination.</p>}</div></section><section className="mobile-panel voice-panel"><header><strong>Voice Assistant</strong><button aria-label="Close">×</button></header><div className="voice-orb"><span>))))</span></div><h3>Listening...</h3><p>Voice objectives use Portal discovery when connected.</p></section><MobileExperience mine={mine} onOpen={open} onNavigate={() => undefined} /></div><footer><div><Logo /><strong>OS Experience</strong></div><span>One OS. Every Experience. The Digiconomy.</span><span>Discover. Add. Experience. Your Digital Life, Your Way.</span></footer></main>;
+}
+
 createRoot(document.getElementById("root")!).render(<App />);
