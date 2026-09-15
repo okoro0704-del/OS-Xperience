@@ -14,9 +14,18 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 900,
+      launchShowDuration: 1200,
+      launchAutoHide: false,
       backgroundColor: "#05070f",
       showSpinner: false,
+    },
+    StatusBar: {
+      style: "DARK",
+      backgroundColor: "#05070f",
+    },
+    Keyboard: {
+      resize: "body",
+      resizeOnFullScreen: true,
     },
   },
 };

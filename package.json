@@ -22,6 +22,8 @@
     "android:open": "npx cap open android",
     "android:release": "npm run android:sync && cd android && gradlew.bat assembleRelease",
     "android:experience:sync": "npm run build:os-experience && npm run cap:sync -w @digiconomy/os-experience",
+    "android:experience:debug": "npm run android:experience:sync && cd apps/os-experience/android && gradlew.bat assembleDebug",
+    "android:experience:release": "npm run android:experience:sync && cd apps/os-experience/android && gradlew.bat assembleRelease",
     "build:xperience": "npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && node scripts/prisma-xperience.mjs generate && npm run build -w @digiconomy/xperience-api && npm run build -w @digiconomy/xperience-console && npm run build -w @digiconomy/xperience-mobile && npm run build -w @digiconomy/os-experience",
     "typecheck:xperience": "npm run typecheck -w @digiconomy/xperience-contract && npm run typecheck -w @digiconomy/xperience-sdk && npm run typecheck -w @digiconomy/xperience-ui && node scripts/prisma-xperience.mjs generate && npm run typecheck -w @digiconomy/xperience-api && npm run typecheck -w @digiconomy/xperience-console && npm run typecheck -w @digiconomy/xperience-mobile && npm run typecheck -w @digiconomy/os-experience",
     "test:xperience": "npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && node scripts/prisma-xperience.mjs generate && node --test-concurrency=1 --import tsx --test packages/xperience-contract/test/*.test.ts api/test/*.test.ts scripts/xperience-architecture-guard.test.mjs",

@@ -28,7 +28,10 @@
   --ox-space-lg: 22px;
   --ox-space-xl: 32px;
   --ox-nav-h: 74px;
+  --ox-safe-top: env(safe-area-inset-top, 0px);
   --ox-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ox-safe-left: env(safe-area-inset-left, 0px);
+  --ox-safe-right: env(safe-area-inset-right, 0px);
   --ox-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
   --ox-font: "Sora", "Outfit", system-ui, sans-serif;
   --ox-mono: "IBM Plex Mono", ui-monospace, monospace;
