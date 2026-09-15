@@ -159,8 +159,13 @@ export type ExperienceMembershipStatus = (typeof EXPERIENCE_MEMBERSHIP_STATUSES)
 
 export const DIRECTORY_CATEGORIES = [
   "All",
+  "Creator",
   "Finance",
   "Lifestyle",
+  "Education",
+  "Health",
+  "Development",
+  "Commerce",
   "Identity",
   "Productivity",
   "Device",
