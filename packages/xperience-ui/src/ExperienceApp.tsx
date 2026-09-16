@@ -39,6 +39,13 @@ import {
   type NavLabsHud,
 } from "./nav-labs/index.js";
 import { NavigationLabsPanel } from "./nav-labs/NavigationLabsPanel.js";
+import {
+  beginLaunchTrace,
+  markLaunch,
+  preconnectOrigins,
+  summarizeLaunch,
+  type LaunchTrace,
+} from "./launch-metrics.js";
 import "./styles.css";
 
 declare global {
@@ -55,7 +62,7 @@ export interface ExperienceAppProps {
   userName?: string;
   /** Register hardware/system Back handler. Return true when UI consumed the event. */
   onHardwareBackReady?: (handler: () => boolean) => void;
-  /** Open HTTPS destinations outside the OS Experience WebView (Custom Tabs / browser). */
+  /** Open HTTPS destinations outside the OS Xperience WebView (Custom Tabs / browser). */
   openExternalUrl?: (url: string) => void | Promise<void>;
   /** Optional online/offline signal from the native shell. */
   online?: boolean | null;
@@ -90,7 +97,7 @@ function initials(value: string): string {
   );
 }
 
-function Icon({ name }: { name: "home" | "directory" | "voice" | "experience" | "profile" | "search" | "bell" | "back" | "more" }) {
+function Icon({ name }: { name: "home" | "directory" | "voice" | "experience" | "profile" | "search" | "bell" | "back" | "more" | "view" }) {
   const paths = {
     home: <><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></>,
     directory: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
@@ -101,12 +108,13 @@ function Icon({ name }: { name: "home" | "directory" | "voice" | "experience" | 
     bell: <><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></>,
     back: <path d="m15 18-6-6 6-6" />,
     more: <><circle cx="5" cy="12" r="1" fill="currentColor" /><circle cx="12" cy="12" r="1" fill="currentColor" /><circle cx="19" cy="12" r="1" fill="currentColor" /></>,
+    view: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
   };
   return <svg className="ox-icon" viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }
 
 function Brand() {
-  return <span className="ox-brand"><span className="ox-logo" aria-hidden="true"><i /></span><strong>OS Experience</strong></span>;
+  return <span className="ox-brand"><span className="ox-logo" aria-hidden="true"><i /></span><strong>OS Xperience</strong></span>;
 }
 
 function AppGlyph({ app, compact = false }: { app: DirectoryApplicationView; compact?: boolean }) {
@@ -117,7 +125,7 @@ function ErrorBanner({ message, onRetry }: { message?: string | null; onRetry: (
   return (
     <div className="ox-error-banner" role="alert" data-testid="error">
       <span>!</span>
-      <p>{message?.trim() || "We couldn't load your Experience right now."}</p>
+      <p>{message?.trim() || "We couldn't load your Xperience right now."}</p>
       <button className="ox-button secondary compact" onClick={onRetry} data-testid="retry">
         Try again
       </button>
@@ -141,11 +149,26 @@ function AppCard({
   busy: boolean;
 }) {
   return <article className="ox-app-card">
-    <button className="ox-card-main" onClick={onSelect} aria-label={`View ${app.name}`}>
+    <button className="ox-card-main" onClick={onSelect} aria-label={`View ${app.name} details`}>
       <AppGlyph app={app} />
       <span><small>{app.category}</small><strong>{app.name}</strong><p>{app.description || "No description provided."}</p></span>
     </button>
-    <div className="ox-card-footer"><span>{app.developerName || "Published application"}</span><button className="ox-button compact" disabled={busy} onClick={onPrimary}>{busy ? "Working…" : app.experienced ? "Open" : "Experience"}</button></div>
+    <div className="ox-card-footer">
+      <span>{app.developerName || "Published application"}</span>
+      <div className="ox-card-actions">
+        <button
+          type="button"
+          className="ox-icon-button ox-view-button"
+          aria-label={`View ${app.name} details`}
+          onClick={onSelect}
+        >
+          <Icon name="view" />
+        </button>
+        <button className="ox-button compact" disabled={busy} onClick={onPrimary}>
+          {busy ? "Working…" : app.experienced ? "Open" : "Xperience"}
+        </button>
+      </div>
+    </div>
   </article>;
 }
 
@@ -154,7 +177,7 @@ function BottomNav({ screen, go }: { screen: Screen; go: (screen: Screen) => voi
     <button data-testid="nav-home" className={screen === "home" ? "active" : ""} onClick={() => go("home")}><Icon name="home" /><span>Home</span></button>
     <button data-testid="nav-directory" className={screen === "directory" ? "active" : ""} onClick={() => go("directory")}><Icon name="directory" /><span>Directory</span></button>
     <button data-testid="nav-voice" className="ox-mobile-mic" onClick={() => go("voice")} aria-label="Voice"><span><Icon name="voice" /></span><small>Voice</small></button>
-    <button data-testid="nav-my-experience" className={screen === "my-experience" ? "active" : ""} onClick={() => go("my-experience")}><Icon name="experience" /><span>My Experience</span></button>
+    <button data-testid="nav-my-experience" className={screen === "my-experience" ? "active" : ""} onClick={() => go("my-experience")}><Icon name="experience" /><span>My Xperience</span></button>
     <button className={screen === "profile" ? "active" : ""} onClick={() => go("profile")}><Icon name="profile" /><span>Profile</span></button>
   </nav>;
 }
@@ -179,6 +202,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [participant, setParticipant] = useState<Participant | null>(null);
   const [selected, setSelected] = useState<DirectoryApplicationView | null>(null);
   const [opened, setOpened] = useState<OpenExperiencePayload | null>(null);
+  const [launchingApp, setLaunchingApp] = useState<DirectoryApplicationView | null>(null);
+  const launchTraceRef = useRef<LaunchTrace | null>(null);
+  const mainScrollRef = useRef<HTMLElement | null>(null);
+  const directoryScrollRef = useRef(0);
+  const [frameReady, setFrameReady] = useState(false);
   const [category, setCategory] = useState("All");
   const [searchText, setSearchText] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
@@ -238,6 +266,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setMemberships(membershipResult.experiences);
       setParticipant(me);
       setError(null);
+      preconnectOrigins([
+        ...directoryResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
+        ...featuredResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
+      ]);
     } catch (reason) {
       setError(reason instanceof XperienceApiError ? reason.message : "The service could not be reached.");
     } finally {
@@ -305,8 +337,21 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }, []);
 
   useEffect(() => {
-    props.onHardwareBackReady?.(handleHardwareBack);
-  }, [props, handleHardwareBack]);
+    const syncVisualViewport = () => {
+      const vv = window.visualViewport;
+      if (!vv) return;
+      document.documentElement.style.setProperty("--ox-visual-height", `${Math.round(vv.height)}px`);
+    };
+    syncVisualViewport();
+    window.visualViewport?.addEventListener("resize", syncVisualViewport);
+    window.visualViewport?.addEventListener("scroll", syncVisualViewport);
+    window.addEventListener("orientationchange", syncVisualViewport);
+    return () => {
+      window.visualViewport?.removeEventListener("resize", syncVisualViewport);
+      window.visualViewport?.removeEventListener("scroll", syncVisualViewport);
+      window.removeEventListener("orientationchange", syncVisualViewport);
+    };
+  }, []);
 
   const exitExperienceToHome = useCallback(() => {
     if (exitingRef.current) return;
@@ -317,7 +362,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
     vibrateEscapeFeedback();
     window.setTimeout(() => {
       setOpened(null);
+      setLaunchingApp(null);
       setFrameFailed(false);
+      setFrameReady(false);
       setEscapeHint(false);
       setExitingExperience(false);
       setAirGrabbed(false);
@@ -469,17 +516,41 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }, [api]);
 
   const startApplication = useCallback(async (app: DirectoryApplicationView) => {
+    const trace = beginLaunchTrace(app);
+    launchTraceRef.current = trace;
+    markLaunch(trace, "identity");
     setBusyId(app.id);
     setError(null);
+    setFrameFailed(false);
+    setFrameReady(false);
+    setLaunchingApp(app);
+    setOpened(null);
+    setExitingExperience(false);
+    exitingRef.current = false;
+    markLaunch(trace, "mode_entered");
+    navigate("experience");
     try {
-      await api.startExperience(app.id);
-      await refreshMemberships();
+      markLaunch(trace, "request");
+      if (!app.experienced) {
+        await api.startExperience(app.id);
+      }
+      markLaunch(trace, "destination");
+      const payload = await api.openExperience(app.id);
+      markLaunch(trace, "response");
+      setOpened(payload);
+      setLaunchingApp(null);
+      void refreshMemberships();
+      summarizeLaunch(trace);
     } catch (reason) {
+      setLaunchingApp(null);
+      setOpened(null);
       setError(reason instanceof Error ? reason.message : "The application could not be added.");
+      navigate("detail");
+      setSelected(app);
     } finally {
       setBusyId(null);
     }
-  }, [api, refreshMemberships]);
+  }, [api, refreshMemberships, navigate]);
 
   const openApplication = useCallback(async (app: DirectoryApplicationView) => {
     if (!app.experienced) {
@@ -487,18 +558,33 @@ export function ExperienceApp(props: ExperienceAppProps) {
       navigate("detail");
       return;
     }
+    const trace = beginLaunchTrace(app);
+    launchTraceRef.current = trace;
+    markLaunch(trace, "identity");
     setBusyId(app.id);
     setError(null);
+    setFrameFailed(false);
+    setFrameReady(false);
+    setLaunchingApp(app);
+    setOpened(null);
+    setExitingExperience(false);
+    exitingRef.current = false;
+    markLaunch(trace, "mode_entered");
+    navigate("experience");
     try {
+      markLaunch(trace, "request");
       const payload = await api.openExperience(app.id);
+      markLaunch(trace, "response");
+      markLaunch(trace, "destination");
       setOpened(payload);
-      setFrameFailed(false);
-      setExitingExperience(false);
-      exitingRef.current = false;
-      navigate("experience");
-      await refreshMemberships();
+      setLaunchingApp(null);
+      void refreshMemberships();
+      summarizeLaunch(trace);
     } catch (reason) {
+      setLaunchingApp(null);
+      setOpened(null);
       setError(reason instanceof Error ? reason.message : `Could not open ${app.name}.`);
+      navigate("my-experience");
     } finally {
       setBusyId(null);
     }
@@ -509,7 +595,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     setVoiceState("resolving");
     if (utterance.kind === "show_experience") {
       navigate("my-experience");
-      setVoiceMessage("Opening My Experience.");
+      setVoiceMessage("Opening My Xperience.");
       setVoiceState("ready");
       return;
     }
@@ -543,7 +629,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         if (utterance.kind === "start_experience") {
           await startApplication(app);
           navigate("my-experience");
-          setVoiceMessage(`${app.name} was added to My Experience.`);
+          setVoiceMessage(`${app.name} was added to My Xperience.`);
         } else {
           await openApplication(app);
           setVoiceMessage(app.experienced ? `Opening ${app.name}.` : `Review ${app.name} before adding it.`);
@@ -667,15 +753,40 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const continueItems = memberships.filter((item) => item.status === "ACTIVE");
 
   const renderGrid = (apps: DirectoryApplicationView[], options?: { home?: boolean }) => loading
-    ? <Skeletons count={4} home={options?.home} />
-    : <div className={`ox-grid${options?.home ? " ox-home-grid" : ""}`}>{apps.map((app) => <AppCard key={app.id} app={app} busy={busyId === app.id} onSelect={() => { setSelected(app); navigate("detail"); }} onPrimary={() => void (app.experienced ? openApplication(app) : startApplication(app))} />)}</div>;
+    ? <Skeletons count={options?.home ? 4 : 6} home={options?.home} />
+    : apps.length === 0
+    ? <div className="ox-inline-empty"><p>No applications match this view.</p></div>
+    : <div className={`ox-grid${options?.home ? " ox-home-grid" : ""}`}>{apps.map((app) => <AppCard key={app.id} app={app} busy={busyId === app.id} onSelect={() => {
+      const scroller = mainScrollRef.current;
+      if (scroller && (screen === "directory" || screen === "search" || screen === "home")) {
+        directoryScrollRef.current = scroller.scrollTop;
+      }
+      setSelected(app);
+      navigate("detail");
+    }} onPrimary={() => void (app.experienced ? openApplication(app) : startApplication(app))} />)}</div>;
 
   function PageHeader({ eyebrow, title, copy }: { eyebrow?: string; title: string; copy?: string }) {
     return <header className="ox-page-header">{eyebrow ? <small>{eyebrow}</small> : null}<h1>{title}</h1>{copy ? <p>{copy}</p> : null}</header>;
   }
 
   function BackButton({ destination = "directory" }: { destination?: Screen }) {
-    return <button className="ox-icon-button" aria-label="Go back" onClick={() => navigate(destination)}><Icon name="back" /></button>;
+    return (
+      <button
+        className="ox-icon-button"
+        type="button"
+        aria-label="Go back"
+        onClick={() => {
+          navigate(destination);
+          window.requestAnimationFrame(() => {
+            if (mainScrollRef.current && (destination === "directory" || destination === "search" || destination === "home")) {
+              mainScrollRef.current.scrollTop = directoryScrollRef.current;
+            }
+          });
+        }}
+      >
+        <Icon name="back" />
+      </button>
+    );
   }
 
   return <div className="ox-root" data-testid="os-experience">
@@ -684,14 +795,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
       <nav className="ox-side-nav" aria-label="Primary navigation">
         <button data-testid="nav-home" className={screen === "home" ? "active" : ""} onClick={() => navigate("home")}><Icon name="home" />Home</button>
         <button data-testid="nav-directory" className={screen === "directory" || screen === "search" || screen === "detail" ? "active" : ""} onClick={() => navigate("directory")}><Icon name="directory" />Directory</button>
-        <button data-testid="nav-my-experience" className={screen === "my-experience" ? "active" : ""} onClick={() => navigate("my-experience")}><Icon name="experience" />My Experience</button>
+        <button data-testid="nav-my-experience" className={screen === "my-experience" ? "active" : ""} onClick={() => navigate("my-experience")}><Icon name="experience" />My Xperience</button>
         <button className={screen === "profile" ? "active" : ""} onClick={() => navigate("profile")}><Icon name="profile" />Profile</button>
       </nav>
-      <button data-testid="nav-voice" className="ox-voice-launch" onClick={() => navigate("voice")}><span><Icon name="voice" /></span><b>Use your voice</b><small>Tell OS Experience your objective</small></button>
+      <button data-testid="nav-voice" className="ox-voice-launch" onClick={() => navigate("voice")}><span><Icon name="voice" /></span><b>Use your voice</b><small>Tell OS Xperience your objective</small></button>
       <div className="ox-side-user"><span>{initials(userName)}</span><div><strong>{userName}</strong><small>Participant</small></div></div>
     </aside> : null}
 
-    <main className="ox-main">
+    <main className="ox-main" ref={(node) => { mainScrollRef.current = node; }}>
       <div className="ox-topbar"><Brand /><div><button className="ox-icon-button" aria-label="Notifications"><Icon name="bell" /></button><button className="ox-avatar" aria-label="Open profile" onClick={() => navigate("profile")}>{initials(userName)}</button></div></div>
       {offline ? <div className="ox-offline-banner" role="status">You&apos;re offline. Directory needs a connection — reconnect and try again.</div> : null}
       {error && screen !== "experience" ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
@@ -705,7 +816,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         </form>
 
         <section className="ox-section">
-          <div className="ox-section-heading"><div><small>PICK UP WHERE YOU LEFT OFF</small><h2>Continue Your Experience</h2></div><button onClick={() => navigate("my-experience")}>See all <span>→</span></button></div>
+          <div className="ox-section-heading"><div><small>PICK UP WHERE YOU LEFT OFF</small><h2>Continue Your Xperience</h2></div><button onClick={() => navigate("my-experience")}>See all <span>→</span></button></div>
           {loading ? <Skeletons count={4} home /> : continueItems.length ? renderGrid(continueItems.slice(0, 4).map((item) => item.application), { home: true }) : <div className="ox-inline-empty"><p>Your active applications will appear here.</p><button onClick={() => navigate("directory")}>Explore Directory</button></div>}
         </section>
 
@@ -717,7 +828,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       </div> : null}
 
       {screen === "directory" ? <div data-testid="directory" className="ox-screen">
-        <PageHeader eyebrow="DISCOVER YOUR DIGITAL WORLD" title="Directory" copy="Browse published applications and shape an experience that is yours." />
+        <PageHeader eyebrow="DISCOVER YOUR DIGITAL WORLD" title="Directory" copy="Browse published applications and build your Xperience." />
         <form className="ox-search" onSubmit={searchApplications}><Icon name="search" /><input data-testid="search-input" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search applications" /><button>Search</button></form>
         <div className="ox-filter-row" aria-label="Directory categories">{DIRECTORY_CATEGORIES.map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}</button>)}</div>
         {renderGrid(filteredDirectory)}
@@ -731,31 +842,72 @@ export function ExperienceApp(props: ExperienceAppProps) {
         {!loading && searchResults.length === 0 ? <div className="ox-inline-empty"><p>No matching applications were found.</p><button onClick={() => { setSearchText(""); setSearchQuery(""); navigate("directory"); }}>Browse Directory</button></div> : null}
       </div> : null}
 
-      {screen === "detail" ? <div className="ox-screen ox-detail">
+      {screen === "detail" && selected ? <div className="ox-screen ox-detail" data-testid="app-details">
         <BackButton />
-        {selected ? <section className="ox-detail-card">
-          <div className="ox-detail-lead"><AppGlyph app={selected} /><div><small>{selected.category}</small><h1>{selected.name}</h1><p>{selected.description || "No public description was provided."}</p></div></div>
-          <dl><div><dt>Publisher</dt><dd>{selected.developerName || "Not provided"}</dd></div><div><dt>Version</dt><dd>{selected.version}</dd></div><div><dt>Capabilities</dt><dd>{selected.capabilities.join(", ") || "None declared"}</dd></div><div><dt>Website</dt><dd><button type="button" className="ox-text-link" onClick={() => openHttps(selected.productionUrl)}>{new URL(selected.productionUrl).hostname}</button></dd></div></dl>
-          <button className="ox-button primary wide" disabled={busyId === selected.id} onClick={() => void (selected.experienced ? openApplication(selected) : startApplication(selected))}>{busyId === selected.id ? "Working…" : selected.experienced ? "Open" : "Experience"}</button>
-        </section> : <div className="ox-inline-empty"><p>Select an application from Directory.</p></div>}
-      </div> : null}
+        <section className="ox-detail-card">
+          <div className="ox-detail-lead">
+            <AppGlyph app={selected} />
+            <div>
+              <small>{selected.category}</small>
+              <h1>{selected.name}</h1>
+              <p>{selected.description || "No public description was provided."}</p>
+            </div>
+          </div>
+          <dl>
+            <div><dt>Publisher</dt><dd>{selected.developerName || "Not provided"}</dd></div>
+            <div><dt>Version</dt><dd>{selected.version}</dd></div>
+            <div><dt>Capabilities</dt><dd>{selected.capabilities.join(", ") || "None declared"}</dd></div>
+            <div>
+              <dt>Website</dt>
+              <dd>
+                <button type="button" className="ox-text-link" onClick={() => openHttps(selected.productionUrl)}>
+                  {new URL(selected.productionUrl).hostname}
+                </button>
+              </dd>
+            </div>
+            {selected.ecosystemSource ? (
+              <div><dt>Directory source</dt><dd>{selected.ecosystemSource === "LIFEOS" ? "LifeOS catalog" : "Xperience publication"}</dd></div>
+            ) : null}
+          </dl>
+          <button
+            className="ox-button primary wide"
+            disabled={busyId === selected.id}
+            onClick={() => void (selected.experienced ? openApplication(selected) : startApplication(selected))}
+          >
+            {busyId === selected.id ? "Opening…" : selected.experienced ? "Open" : "Xperience"}
+          </button>
+          {selected.experienced ? (
+            <button
+              type="button"
+              className="ox-button secondary wide"
+              style={{ marginTop: 10 }}
+              onClick={() => {
+                const membership = memberships.find((m) => m.applicationId === selected.id);
+                if (membership) setStopTarget(membership);
+              }}
+            >
+              Unxperience
+            </button>
+          ) : null}
+        </section>
+      </div> : screen === "detail" ? <div className="ox-screen ox-detail"><BackButton /><div className="ox-inline-empty"><p>Select an application from Directory.</p></div></div> : null}
 
       {screen === "my-experience" ? <div data-testid="my-experience" className="ox-screen">
-        <PageHeader eyebrow="YOUR DIGITAL SPACE" title="My Experience" copy="The applications you have chosen, together in one place." />
+        <PageHeader eyebrow="YOUR DIGITAL SPACE" title="My Xperience" copy="The applications you have chosen, together in one place." />
         <div className="ox-filter-row">{(["All", "Active", "Paused", "Recently Used"] as MembershipFilter[]).map((item) => <button className={membershipFilter === item ? "active" : ""} key={item} onClick={() => setMembershipFilter(item)}>{item}</button>)}</div>
         {loading ? <Skeletons /> : filteredMemberships.length ? <div className="ox-memberships">{filteredMemberships.map((item) => <article key={item.applicationId}>
           <AppGlyph compact app={item.application} /><div><strong>{item.application.name}</strong><small><i className={`ox-status ${item.status.toLowerCase()}`} />{item.status === "ACTIVE" ? "Active" : item.status === "PAUSED" ? "Paused" : "Unavailable"}{item.lastOpenedAt ? ` · Used ${new Date(item.lastOpenedAt).toLocaleDateString()}` : ""}</small></div>
           <button className="ox-button compact" disabled={item.status === "UNAVAILABLE" || busyId === item.applicationId} onClick={() => void openApplication(item.application)}>Open</button>
-          <button className="ox-icon-button" aria-label={`Stop experiencing ${item.application.name}`} onClick={() => setStopTarget(item)}><Icon name="more" /></button>
-        </article>)}</div> : <section className="ox-state"><span>◇</span><h2>Your Experience is ready to grow</h2><p>Add an application from Directory to see it here.</p><button className="ox-button primary" onClick={() => navigate("directory")}>Explore Directory</button></section>}
+          <button className="ox-icon-button" aria-label={`Unxperience ${item.application.name}`} onClick={() => setStopTarget(item)}><Icon name="more" /></button>
+        </article>)}</div> : <section className="ox-state"><span>◇</span><h2>Your Xperience is ready to grow</h2><p>Add an application from Directory to see it here.</p><button className="ox-button primary" onClick={() => navigate("directory")}>Explore Directory</button></section>}
       </div> : null}
 
       {screen === "profile" ? <div className="ox-screen">
-        <PageHeader eyebrow="PARTICIPANT" title="Profile" copy="Your participant information for this OS Experience." />
+        <PageHeader eyebrow="PARTICIPANT" title="Profile" copy="Your participant information for this OS Xperience." />
         <section className="ox-profile-card"><span className="ox-profile-avatar">{initials(participant?.displayName || userName)}</span><div><h2>{participant?.displayName || userName}</h2><p>{participant?.email || "No email provided"}</p></div><dl><div><dt>Participant ID</dt><dd>{participant?.id || userId}</dd></div><div><dt>Role</dt><dd>{participant?.role || "USER"}</dd></div></dl></section>
         <section className="ox-help-card">
           <small>GESTURES</small>
-          <h2>Leave an Experience</h2>
+          <h2>Leave Xperience</h2>
           <p>While an application fills the screen, use system Back or an enabled Navigation Labs experiment to return Home. One-finger interaction stays with the application.</p>
           <label className="ox-toggle-row">
             <span>Air Navigation (legacy)</span>
@@ -813,11 +965,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
         </section>
       </div> : null}
 
-      {screen === "experience" && opened ? (
+      {screen === "experience" && (opened || launchingApp) ? (
         <>
           {labsEnabled ? (
             <div className="ox-nav-peek" aria-hidden="true">
-              <strong>OS Experience</strong>
+              <strong>OS Xperience</strong>
               <span>Home</span>
             </div>
           ) : null}
@@ -851,43 +1003,47 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 <div>EXIT: {exitProbe.toUpperCase()}</div>
                 <div>POINTERS: {pointerCount}</div>
                 <div>TOUCH: {gestureDebug || "none"}</div>
-                <div>AIR LEGACY: {airEnabled ? "ON" : "OFF"}</div>
-                <div>CAMERA: {(airDebug?.camera || "off").toUpperCase()}</div>
-                <div>HAND: {(airDebug?.hand || "none").toUpperCase()}</div>
               </div>
             ) : null}
             <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
               Return to OS Xperience Home
             </button>
-            {frameFailed ? (
+            {(launchingApp || (opened && !frameReady && !frameFailed)) ? (
+              <section className="ox-launch-shell" aria-live="polite" aria-busy={!opened || !frameReady}>
+                <span className="ox-app-glyph" aria-hidden="true">
+                  {initials(launchingApp?.name || opened?.name || "OX")}
+                </span>
+                <h1>{launchingApp?.name || opened?.name}</h1>
+                <p>Opening…</p>
+              </section>
+            ) : null}
+            {frameFailed && opened ? (
               <section className="ox-frame-fallback ox-immersive-fallback">
-                <h1>This application couldn&apos;t be embedded</h1>
+                <h1>{opened.name} couldn&apos;t open</h1>
                 <p>It may only allow a full browser window.</p>
                 <button className="ox-button primary" type="button" onClick={() => openHttps(opened.embedUrl)}>
-                  Open externally
+                  Try again externally
                 </button>
                 <button className="ox-button secondary" type="button" onClick={exitExperienceToHome}>
                   Back to Home
                 </button>
               </section>
-            ) : (
+            ) : opened ? (
               <iframe
-                className="ox-immersive-frame"
+                className={`ox-immersive-frame${frameReady ? " is-ready" : " is-loading"}`}
                 title={opened.name}
                 src={opened.embedUrl}
                 sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
                 referrerPolicy="strict-origin-when-cross-origin"
                 onError={() => setFrameFailed(true)}
-                onLoad={(event) => {
-                  try {
-                    const frame = event.currentTarget;
-                    void frame.contentWindow?.location.href;
-                  } catch {
-                    /* cross-origin embed succeeded */
-                  }
+                onLoad={() => {
+                  markLaunch(launchTraceRef.current, "first_pixel");
+                  markLaunch(launchTraceRef.current, "interactive");
+                  summarizeLaunch(launchTraceRef.current);
+                  setFrameReady(true);
                 }}
               />
-            )}
+            ) : null}
           </div>
         </>
       ) : null}
@@ -895,7 +1051,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
     {!isDesktop && screen !== "experience" ? <BottomNav screen={screen} go={navigate} /> : null}
     {stopTarget ? <div className="ox-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setStopTarget(null); }}>
-      <section data-testid="stop-modal" className="ox-modal" role="dialog" aria-modal="true" aria-labelledby="stop-title"><span className="ox-modal-icon">◇</span><h2 id="stop-title">Stop experiencing {stopTarget.application.name}?</h2><p>This removes it from My Experience. You can add it again from Directory at any time.</p><div><button className="ox-button secondary" onClick={() => setStopTarget(null)}>Cancel</button><button data-testid="confirm-stop" className="ox-button danger" disabled={busyId === stopTarget.applicationId} onClick={() => void confirmStop()}>Stop Experiencing</button></div></section>
+      <section data-testid="stop-modal" className="ox-modal" role="dialog" aria-modal="true" aria-labelledby="stop-title"><span className="ox-modal-icon">◇</span><h2 id="stop-title">Unxperience {stopTarget.application.name}?</h2><p>This removes it from My Xperience. You can add it again from Directory at any time.</p><div><button className="ox-button secondary" onClick={() => setStopTarget(null)}>Cancel</button><button data-testid="confirm-stop" className="ox-button danger" disabled={busyId === stopTarget.applicationId} onClick={() => void confirmStop()}>Unxperience</button></div></section>
     </div> : null}
   </div>;
 }

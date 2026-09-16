@@ -1,7 +1,7 @@
 {
-  "name": "OS Experience",
-  "short_name": "OS Experience",
-  "description": "Your Digital Life. Your Applications. One Experience.",
+  "name": "OS Xperience",
+  "short_name": "OS Xperience",
+  "description": "Your Digital Life. Your Applications. One Xperience.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

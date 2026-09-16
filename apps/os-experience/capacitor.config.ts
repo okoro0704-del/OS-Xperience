@@ -6,7 +6,7 @@ import type { CapacitorConfig } from "@capacitor/cli";
  */
 const config: CapacitorConfig = {
   appId: "com.digiconomy.osexperience",
-  appName: "OS Experience",
+  appName: "OS Xperience",
   webDir: "dist",
   server: {
     androidScheme: "https",

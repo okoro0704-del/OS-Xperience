@@ -276,13 +276,68 @@ a { color: inherit; }
 .ox-voice-examples button { padding: 8px 12px; font-size: 10px; }
 
 .ox-in-app { position: fixed; inset: 0; z-index: 60; display: grid; grid-template-rows: auto 1fr; background: var(--ox-bg); padding-left: var(--ox-safe-left); padding-right: var(--ox-safe-right); }
+.ox-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ox-view-button {
+  color: #8eb4ff;
+}
+.ox-launch-shell {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 12px;
+  background: #05070f;
+  color: var(--ox-text);
+  text-align: center;
+  pointer-events: none;
+}
+.ox-launch-shell .ox-app-glyph {
+  width: 72px;
+  height: 72px;
+  font-size: 22px;
+}
+.ox-launch-shell h1 {
+  margin: 0;
+  font-family: "Outfit", sans-serif;
+  font-size: 22px;
+  letter-spacing: -.03em;
+}
+.ox-launch-shell p {
+  margin: 0;
+  color: var(--ox-text-secondary);
+  font-size: 13px;
+}
+.ox-immersive-frame.is-loading {
+  opacity: 0;
+}
+.ox-immersive-frame.is-ready {
+  opacity: 1;
+  transition: opacity .18s var(--ox-ease);
+}
 .ox-in-app.ox-immersive {
-  /* Usable app viewport only — Android/PWA system insets via --ox-safe-*. */
   grid-template-rows: 1fr;
   padding: var(--ox-safe-top) var(--ox-safe-right) var(--ox-safe-bottom) var(--ox-safe-left);
   background: #000;
   touch-action: manipulation;
   transition: transform .22s var(--ox-ease), opacity .22s var(--ox-ease);
+  height: 100dvh;
+  height: 100svh;
+  max-height: 100dvh;
+  overflow: hidden;
+}
+html.ox-keyboard-open .ox-in-app.ox-immersive {
+  height: var(--ox-visual-height, 100dvh);
+  max-height: var(--ox-visual-height, 100dvh);
+}
+.ox-detail .ox-button.wide + .ox-button.wide,
+.ox-detail .ox-button.primary.wide + .ox-button.secondary.wide {
+  margin-top: 10px;
 }
 .ox-in-app.ox-immersive.is-exiting {
   transform: scale(.965);

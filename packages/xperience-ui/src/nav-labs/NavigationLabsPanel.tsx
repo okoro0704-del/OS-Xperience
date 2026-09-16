@@ -104,7 +104,7 @@ export function NavigationLabsPanel({ onBack }: { onBack: () => void }) {
 
       <section className="ox-help-card">
         <label className="ox-toggle-row">
-          <span>Enable Navigation Labs in ExperienceMode</span>
+          <span>Enable Navigation Labs in XperienceMode</span>
           <input type="checkbox" checked={enabled} onChange={(e) => persistEnabled(e.target.checked)} />
         </label>
         <label className="ox-toggle-row">
@@ -119,7 +119,7 @@ export function NavigationLabsPanel({ onBack }: { onBack: () => void }) {
           />
         </label>
         <p className="ox-labs-note">
-          Labs is for physical testing only. Every experiment calls the same exit primitive. Open a real app from My Experience after selecting an experiment.
+          Labs is for physical testing only. Every experiment calls the same exit primitive. Open a real app from My Xperience after selecting an experiment.
         </p>
       </section>
 

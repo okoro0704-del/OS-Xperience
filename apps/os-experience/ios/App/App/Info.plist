@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>OS Experience</string>
+        <string>OS Xperience</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -46,8 +46,8 @@
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>OS Experience uses the camera on this device for optional Air Navigation hand gestures. Frames stay on your device and are not uploaded or stored.</string>
+	<string>OS Xperience uses the camera on this device for optional Air Navigation hand gestures. Frames stay on your device and are not uploaded or stored.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OS Experience uses the microphone for optional Voice objectives. Audio is processed on your device for recognition requests you start.</string>
+	<string>OS Xperience uses the microphone for optional Voice objectives. Audio is processed on your device for recognition requests you start.</string>
 </dict>
 </plist>

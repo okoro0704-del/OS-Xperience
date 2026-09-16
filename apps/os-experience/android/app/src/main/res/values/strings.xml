@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">OS Experience</string>
-    <string name="title_activity_main">OS Experience</string>
+    <string name="app_name">OS Xperience</string>
+    <string name="title_activity_main">OS Xperience</string>
     <string name="package_name">com.digiconomy.osexperience</string>
     <string name="custom_url_scheme">com.digiconomy.osexperience</string>
 </resources>
