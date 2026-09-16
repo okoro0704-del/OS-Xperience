@@ -24,18 +24,22 @@
   --ox-radius-xl: 28px;
   --ox-space-xs: 4px;
   --ox-space-sm: 8px;
-  --ox-space-md: 14px;
-  --ox-space-lg: 22px;
-  --ox-space-xl: 32px;
+  --ox-space-md: 12px;
+  --ox-space-lg: 18px;
+  --ox-space-xl: 28px;
   --ox-nav-h: 74px;
   --ox-safe-top: env(safe-area-inset-top, 0px);
   --ox-safe-bottom: env(safe-area-inset-bottom, 0px);
   --ox-safe-left: env(safe-area-inset-left, 0px);
   --ox-safe-right: env(safe-area-inset-right, 0px);
-  --ox-shadow: 0 18px 48px rgba(0, 0, 0, 0.35);
+  --ox-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
   --ox-font: "Sora", "Outfit", system-ui, sans-serif;
   --ox-mono: "IBM Plex Mono", ui-monospace, monospace;
   --ox-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --ox-title-size: clamp(22px, 4vw, 30px);
+  --ox-section-size: clamp(16px, 2.4vw, 20px);
+  --ox-card-title: 14px;
+  --ox-search-max: 560px;
 
   /* Back-compat aliases used by existing class names */
   --bg: var(--ox-bg);
