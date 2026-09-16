@@ -38,17 +38,47 @@ export type CapabilityReviewState = (typeof CAPABILITY_REVIEW_STATES)[number];
 export const EVIDENCE_STATUSES = ["PENDING", "VERIFIED", "FAILED", "UNAVAILABLE"] as const;
 export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
 
+/** Canonical launch surfaces for one Application identity — not separate Directory apps. */
+export const APPLICATION_SURFACE_TYPES = ["PUBLIC", "MANAGEMENT"] as const;
+export type ApplicationSurfaceType = (typeof APPLICATION_SURFACE_TYPES)[number];
+
 export interface ApplicationManifestClaim {
   schemaVersion: "1";
   applicationId: string;
   name: string;
   version: string;
   origin: string;
+  /** Canonical USER / public surface destination. */
   productionUrl: string;
   xperienceUrl: string;
+  /**
+   * Optional canonical MANAGEMENT surface destination.
+   * Must be an explicit HTTPS URL — never inferred as `${productionUrl}/admin`.
+   */
+  managementUrl?: string;
+  /**
+   * Participant IDs with a legitimate management-entry relationship.
+   * Entry visibility only — the target app still authorizes real capabilities.
+   */
+  managementOperatorIds?: string[];
   capabilities: Capability[];
   repository?: { provider: "GITHUB"; url: string };
   deploymentClaims?: { provider: string; url: string }[];
+}
+
+/** Normalize an optional management destination — absent or unsafe → undefined (never invent). */
+export function normalizeManagementUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const trimmed = value.trim();
+  return safeHttpsUrl(trimmed) ? trimmed : undefined;
+}
+
+export function normalizeManagementOperatorIds(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const ids = value
+    .filter((item): item is string => typeof item === "string" && item.trim().length > 0)
+    .map((item) => item.trim());
+  return ids.length ? [...new Set(ids)] : undefined;
 }
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; errors: string[] };
@@ -90,6 +120,19 @@ export function validateManifest(input: unknown): ValidationResult<ApplicationMa
   for (const key of ["productionUrl", "xperienceUrl"]) {
     if (typeof m[key] !== "string" || !safeHttpsUrl(m[key] as string)) errors.push(`${key} must be a public HTTPS URL.`);
   }
+  if (m.managementUrl != null) {
+    if (typeof m.managementUrl !== "string" || !safeHttpsUrl(m.managementUrl)) {
+      errors.push("managementUrl must be a public HTTPS URL when declared.");
+    }
+  }
+  if (m.managementOperatorIds != null) {
+    if (
+      !Array.isArray(m.managementOperatorIds) ||
+      m.managementOperatorIds.some((id) => typeof id !== "string" || !id.trim())
+    ) {
+      errors.push("managementOperatorIds must be an array of participant id strings when declared.");
+    }
+  }
   const capabilities = m.capabilities;
   if (
     !Array.isArray(capabilities) ||
@@ -100,7 +143,28 @@ export function validateManifest(input: unknown): ValidationResult<ApplicationMa
   if (forbidden.test(JSON.stringify(input))) {
     errors.push("Manifest must not contain credentials or sensitive identity data.");
   }
-  return errors.length ? { ok: false, errors } : { ok: true, value: m as unknown as ApplicationManifestClaim };
+  if (errors.length) return { ok: false, errors };
+  const value: ApplicationManifestClaim = {
+    schemaVersion: "1",
+    applicationId: m.applicationId as string,
+    name: m.name as string,
+    version: m.version as string,
+    origin: m.origin as string,
+    productionUrl: m.productionUrl as string,
+    xperienceUrl: m.xperienceUrl as string,
+    capabilities: m.capabilities as Capability[],
+  };
+  const managementUrl = normalizeManagementUrl(m.managementUrl);
+  if (managementUrl) value.managementUrl = managementUrl;
+  const managementOperatorIds = normalizeManagementOperatorIds(m.managementOperatorIds);
+  if (managementOperatorIds) value.managementOperatorIds = managementOperatorIds;
+  if (m.repository && typeof m.repository === "object") {
+    value.repository = m.repository as ApplicationManifestClaim["repository"];
+  }
+  if (Array.isArray(m.deploymentClaims)) {
+    value.deploymentClaims = m.deploymentClaims as ApplicationManifestClaim["deploymentClaims"];
+  }
+  return { ok: true, value };
 }
 
 export function reviewTransitionAllowed(from: ReviewState, to: ReviewState): boolean {
@@ -193,8 +257,19 @@ export interface DirectoryApplicationView {
   name: string;
   version: string;
   origin: string;
+  /** Canonical USER / public surface. */
   productionUrl: string;
   xperienceUrl: string;
+  /**
+   * Canonical MANAGEMENT surface when Portal/manifest declared one.
+   * Omitted when undeclared — never synthesized from `/admin`.
+   */
+  managementUrl?: string;
+  /**
+   * Server-evaluated management-entry relationship for the current participant.
+   * Presence of managementUrl alone is not sufficient.
+   */
+  canManage: boolean;
   category: Exclude<DirectoryCategory, "All">;
   capabilities: Capability[];
   publicationState: "PUBLISHED" | "NOT_PUBLISHED";
@@ -216,8 +291,13 @@ export interface LifeOSCatalogApplicationClaim {
   name: string;
   version: string;
   origin: string;
+  /** Canonical USER / public surface. */
   productionUrl: string;
   xperienceUrl: string;
+  /** Optional MANAGEMENT surface — Portal-declared only. */
+  managementUrl?: string;
+  /** Participant IDs with management-entry relationship (Portal-declared). */
+  managementOperatorIds?: string[];
   capabilities: Capability[];
   /** PUBLIC eligible for Directory; PRIVATE never listed. */
   visibility: "PUBLIC" | "PRIVATE";
@@ -291,7 +371,7 @@ export function parseLifeOSCatalogPayload(input: unknown): LifeOSCatalogApplicat
     ) {
       continue;
     }
-    out.push({
+    const claim: LifeOSCatalogApplicationClaim = {
       applicationId,
       name: row.name,
       version: row.version,
@@ -303,7 +383,12 @@ export function parseLifeOSCatalogPayload(input: unknown): LifeOSCatalogApplicat
       publicationState,
       description: typeof row.description === "string" ? row.description : undefined,
       developerName: typeof row.developerName === "string" ? row.developerName : undefined,
-    });
+    };
+    const managementUrl = normalizeManagementUrl(row.managementUrl);
+    if (managementUrl) claim.managementUrl = managementUrl;
+    const managementOperatorIds = normalizeManagementOperatorIds(row.managementOperatorIds);
+    if (managementOperatorIds) claim.managementOperatorIds = managementOperatorIds;
+    out.push(claim);
   }
   return out;
 }
@@ -321,7 +406,10 @@ export interface OpenExperiencePayload {
   applicationId: string;
   name: string;
   origin: string;
+  /** Resolved destination for the requested surface. */
   embedUrl: string;
+  /** Which canonical surface was opened — PUBLIC never silently becomes MANAGEMENT. */
+  surface: ApplicationSurfaceType;
   status: ExperienceMembershipStatus;
 }
 

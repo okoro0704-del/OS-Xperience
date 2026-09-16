@@ -1,10 +1,12 @@
 import {
   capabilityApprovalIsNotRuntimeAuthorization,
   directoryCategory,
+  normalizeManagementUrl,
   reviewTransitionAllowed,
   safeHttpsUrl,
   validateManifest,
   type ApplicationCapabilityView,
+  type ApplicationSurfaceType,
   type ApplicationView,
   type AuditEventView,
   type Capability,
@@ -20,6 +22,10 @@ import {
   type VerificationEvidenceView,
 } from "@digiconomy/xperience-contract";
 import { EmptyLifeOSCatalog, type LifeOSCatalogPort } from "./lifeos-catalog.js";
+import {
+  EmptyManagementAccess,
+  type ManagementAccessPort,
+} from "./management-access.js";
 import type { ApplicationRepository } from "./repository.js";
 import type { VerificationService } from "./verification.js";
 
@@ -81,6 +87,7 @@ export class XperienceService {
     private readonly repository: ApplicationRepository,
     private readonly verification?: VerificationService,
     private readonly lifeosCatalog: LifeOSCatalogPort = new EmptyLifeOSCatalog(),
+    private readonly managementAccess: ManagementAccessPort = new EmptyManagementAccess(),
   ) {}
 
   private async log(
@@ -120,15 +127,53 @@ export class XperienceService {
     if (actor.role !== "USER") throw new DomainError("User role required.", "forbidden");
   }
 
-  private toDirectoryView(
+  private declaredManagementUrl(resolved: ResolvedPublished): string | undefined {
+    if (resolved.kind === "xperience") {
+      return normalizeManagementUrl(resolved.app.manifest.managementUrl);
+    }
+    return normalizeManagementUrl(resolved.claim.managementUrl);
+  }
+
+  private declaredOperatorIds(resolved: ResolvedPublished): readonly string[] {
+    if (resolved.kind === "xperience") {
+      return resolved.app.manifest.managementOperatorIds ?? [];
+    }
+    return resolved.claim.managementOperatorIds ?? [];
+  }
+
+  /** Entry visibility only — target app still authorizes detailed capabilities. */
+  private async evaluateCanManage(
+    actor: Actor,
+    applicationId: string,
+    managementUrl: string | undefined,
+    operatorIds: readonly string[],
+  ): Promise<boolean> {
+    if (!managementUrl) return false;
+    if (operatorIds.includes(actor.id)) return true;
+    return this.managementAccess.hasManagementEntry(actor.id, applicationId);
+  }
+
+  private async toDirectoryView(
+    actor: Actor,
     app: ApplicationRecord,
     membership?: { status: "ACTIVE" | "PAUSED" } | null,
-  ): DirectoryApplicationView {
+  ): Promise<DirectoryApplicationView> {
     const published = app.state === "PUBLISHED";
     let experienceStatus: ExperienceMembershipStatus | undefined;
     if (membership) {
       experienceStatus = published ? membership.status : "UNAVAILABLE";
     }
+    const managementUrl = published
+      ? normalizeManagementUrl(app.manifest.managementUrl)
+      : undefined;
+    const canManage = published
+      ? await this.evaluateCanManage(
+          actor,
+          app.id,
+          managementUrl,
+          app.manifest.managementOperatorIds ?? [],
+        )
+      : false;
     return {
       id: app.id,
       name: app.manifest.name,
@@ -136,6 +181,8 @@ export class XperienceService {
       origin: app.manifest.origin,
       productionUrl: app.manifest.productionUrl,
       xperienceUrl: app.manifest.xperienceUrl,
+      ...(managementUrl ? { managementUrl } : {}),
+      canManage,
       category: directoryCategory(app.manifest.capabilities),
       capabilities: [...app.manifest.capabilities],
       publicationState: published ? "PUBLISHED" : "NOT_PUBLISHED",
@@ -145,10 +192,18 @@ export class XperienceService {
     };
   }
 
-  private toDirectoryViewFromLifeOS(
+  private async toDirectoryViewFromLifeOS(
+    actor: Actor,
     claim: LifeOSCatalogApplicationClaim,
     membership?: { status: "ACTIVE" | "PAUSED" } | null,
-  ): DirectoryApplicationView {
+  ): Promise<DirectoryApplicationView> {
+    const managementUrl = normalizeManagementUrl(claim.managementUrl);
+    const canManage = await this.evaluateCanManage(
+      actor,
+      claim.applicationId,
+      managementUrl,
+      claim.managementOperatorIds ?? [],
+    );
     return {
       id: claim.applicationId,
       name: claim.name,
@@ -156,6 +211,8 @@ export class XperienceService {
       origin: claim.origin,
       productionUrl: claim.productionUrl,
       xperienceUrl: claim.xperienceUrl,
+      ...(managementUrl ? { managementUrl } : {}),
+      canManage,
       category: directoryCategory(claim.capabilities),
       capabilities: [...claim.capabilities],
       publicationState: "PUBLISHED",
@@ -175,25 +232,29 @@ export class XperienceService {
     return null;
   }
 
-  private directoryFromResolved(
+  private async directoryFromResolved(
+    actor: Actor,
     resolved: ResolvedPublished,
     membership?: { status: "ACTIVE" | "PAUSED" } | null,
-  ): DirectoryApplicationView {
+  ): Promise<DirectoryApplicationView> {
     return resolved.kind === "xperience"
-      ? this.toDirectoryView(resolved.app, membership)
-      : this.toDirectoryViewFromLifeOS(resolved.claim, membership);
+      ? this.toDirectoryView(actor, resolved.app, membership)
+      : this.toDirectoryViewFromLifeOS(actor, resolved.claim, membership);
   }
 
   private openPayloadFromResolved(
     resolved: ResolvedPublished,
     status: ExperienceMembershipStatus,
+    surface: ApplicationSurfaceType,
+    embedUrl: string,
   ): OpenExperiencePayload {
     if (resolved.kind === "xperience") {
       return {
         applicationId: resolved.app.id,
         name: resolved.app.manifest.name,
         origin: resolved.app.manifest.origin,
-        embedUrl: resolved.app.manifest.productionUrl,
+        embedUrl,
+        surface,
         status,
       };
     }
@@ -201,7 +262,8 @@ export class XperienceService {
       applicationId: resolved.claim.applicationId,
       name: resolved.claim.name,
       origin: resolved.claim.origin,
-      embedUrl: resolved.claim.productionUrl,
+      embedUrl,
+      surface,
       status,
     };
   }
@@ -403,12 +465,15 @@ export class XperienceService {
 
     const byId = new Map<string, DirectoryApplicationView>();
     for (const app of published) {
-      byId.set(app.id, this.toDirectoryView(app, byApp.get(app.id) ?? null));
+      byId.set(app.id, await this.toDirectoryView(actor, app, byApp.get(app.id) ?? null));
     }
     // LifeOS eligible verticals project into Directory without duplicating Application rows.
     for (const claim of await this.lifeosCatalog.listEligible()) {
       if (byId.has(claim.applicationId)) continue;
-      byId.set(claim.applicationId, this.toDirectoryViewFromLifeOS(claim, byApp.get(claim.applicationId) ?? null));
+      byId.set(
+        claim.applicationId,
+        await this.toDirectoryViewFromLifeOS(actor, claim, byApp.get(claim.applicationId) ?? null),
+      );
     }
 
     return [...byId.values()].filter((app) => {
@@ -425,7 +490,7 @@ export class XperienceService {
     const resolved = await this.resolvePublished(id);
     if (!resolved) throw new DomainError("Published application not found.", "not_found");
     const membership = await this.repository.findExperienceSelection(actor.id, id);
-    return this.directoryFromResolved(resolved, membership);
+    return this.directoryFromResolved(actor, resolved, membership);
   }
 
   async listMyExperience(
@@ -441,7 +506,7 @@ export class XperienceService {
         // Membership may outlive Directory eligibility; keep UNAVAILABLE without inventing app data.
         const orphan = await this.repository.find(selection.applicationId);
         if (!orphan) continue;
-        const directory = this.toDirectoryView(orphan, selection);
+        const directory = await this.toDirectoryView(actor, orphan, selection);
         items.push({
           applicationId: selection.applicationId,
           status: "UNAVAILABLE",
@@ -451,7 +516,7 @@ export class XperienceService {
         });
         continue;
       }
-      const directory = this.directoryFromResolved(resolved, selection);
+      const directory = await this.directoryFromResolved(actor, resolved, selection);
       items.push({
         applicationId: selection.applicationId,
         status: selection.status,
@@ -494,7 +559,7 @@ export class XperienceService {
       applicationId,
       status: "ACTIVE",
       addedAt: selection.addedAt,
-      application: this.directoryFromResolved(resolved, selection),
+      application: await this.directoryFromResolved(actor, resolved, selection),
     };
   }
 
@@ -525,7 +590,7 @@ export class XperienceService {
       status,
       addedAt: updated.addedAt,
       lastOpenedAt: updated.lastOpenedAt,
-      application: this.directoryFromResolved(resolved, updated),
+      application: await this.directoryFromResolved(actor, resolved, updated),
     };
   }
 
@@ -538,7 +603,11 @@ export class XperienceService {
     return { removed: true };
   }
 
-  async openExperience(actor: Actor, applicationId: string): Promise<OpenExperiencePayload> {
+  async openExperience(
+    actor: Actor,
+    applicationId: string,
+    options?: { surface?: ApplicationSurfaceType },
+  ): Promise<OpenExperiencePayload> {
     this.requireUser(actor);
     const selection = await this.repository.findExperienceSelection(actor.id, applicationId);
     if (!selection) throw new DomainError("Application is not in your Experience.", "not_found");
@@ -549,7 +618,32 @@ export class XperienceService {
     if (selection.status === "PAUSED") {
       throw new DomainError("Resume the experience before opening.", "invalid");
     }
-    const draft = this.openPayloadFromResolved(resolved, selection.status);
+
+    const surface: ApplicationSurfaceType = options?.surface === "MANAGEMENT" ? "MANAGEMENT" : "PUBLIC";
+    let embedUrl: string;
+    if (surface === "PUBLIC") {
+      embedUrl =
+        resolved.kind === "xperience"
+          ? resolved.app.manifest.productionUrl
+          : resolved.claim.productionUrl;
+    } else {
+      const managementUrl = this.declaredManagementUrl(resolved);
+      const canManage = await this.evaluateCanManage(
+        actor,
+        applicationId,
+        managementUrl,
+        this.declaredOperatorIds(resolved),
+      );
+      if (!managementUrl || !canManage) {
+        throw new DomainError(
+          "Management surface is not available for this participant.",
+          "forbidden",
+        );
+      }
+      embedUrl = managementUrl;
+    }
+
+    const draft = this.openPayloadFromResolved(resolved, selection.status, surface, embedUrl);
     if (!safeHttpsUrl(draft.embedUrl) || !safeHttpsUrl(draft.origin)) {
       throw new DomainError("Application origin failed safety validation.", "forbidden");
     }
@@ -557,7 +651,11 @@ export class XperienceService {
       ...selection,
       lastOpenedAt: new Date().toISOString(),
     });
-    await this.log("EXPERIENCE_OPENED", actor, applicationId);
+    await this.log(
+      surface === "MANAGEMENT" ? "EXPERIENCE_MANAGE_OPENED" : "EXPERIENCE_OPENED",
+      actor,
+      applicationId,
+    );
     return { ...draft, status: updated.status };
   }
 

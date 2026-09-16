@@ -11,6 +11,7 @@ import {
 import { DevelopmentAuthenticationProvider, productionAuthProvider, type AuthenticationProvider } from "./auth.js";
 import { DomainError, XperienceService, type Actor } from "./domain.js";
 import { createLifeOSCatalogFromEnv, type LifeOSCatalogPort } from "./lifeos-catalog.js";
+import { createManagementAccessFromEnv, type ManagementAccessPort } from "./management-access.js";
 import { closePrisma, prismaClient } from "./prisma.js";
 import {
   createApplicationRepository,
@@ -30,6 +31,7 @@ export function createRuntime(overrides?: {
   auth?: AuthenticationProvider;
   verification?: VerificationService;
   lifeosCatalog?: LifeOSCatalogPort;
+  managementAccess?: ManagementAccessPort;
 }): ApiRuntime {
   const mode = overrides?.repository ? undefined : resolveRepositoryMode();
   const repository =
@@ -42,10 +44,11 @@ export function createRuntime(overrides?: {
       : productionAuthProvider());
   const verification = overrides?.verification ?? new VerificationService();
   const lifeosCatalog = overrides?.lifeosCatalog ?? createLifeOSCatalogFromEnv();
+  const managementAccess = overrides?.managementAccess ?? createManagementAccessFromEnv();
   return {
     repository,
     auth,
-    service: new XperienceService(repository, verification, lifeosCatalog),
+    service: new XperienceService(repository, verification, lifeosCatalog, managementAccess),
   };
 }
 
@@ -199,7 +202,11 @@ async function route(
     if (req.method === "DELETE" && !op) return send(res, 200, await service.stopExperience(actor, id));
     if (req.method === "POST" && op === "pause") return send(res, 200, await service.pauseExperience(actor, id));
     if (req.method === "POST" && op === "resume") return send(res, 200, await service.resumeExperience(actor, id));
-    if (req.method === "POST" && op === "open") return send(res, 200, await service.openExperience(actor, id));
+    if (req.method === "POST" && op === "open") {
+      const body = (await readBody(req)) as { surface?: string };
+      const surface = body.surface === "MANAGEMENT" ? "MANAGEMENT" : "PUBLIC";
+      return send(res, 200, await service.openExperience(actor, id, { surface }));
+    }
   }
 
   if (req.method === "GET" && path === "/v1/applications") {

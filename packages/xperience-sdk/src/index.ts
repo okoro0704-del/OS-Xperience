@@ -2,6 +2,7 @@ import {
   isAllowedMessageOrigin,
   validateHandshake,
   type ApplicationManifestClaim,
+  type ApplicationSurfaceType,
   type ApplicationView,
   type AuditEventView,
   type Capability,
@@ -165,8 +166,10 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
       request<ExperienceMembershipView>("POST", `/v1/experience/${encodeURIComponent(id)}/pause`),
     resumeExperience: (id: string) =>
       request<ExperienceMembershipView>("POST", `/v1/experience/${encodeURIComponent(id)}/resume`),
-    openExperience: (id: string) =>
-      request<OpenExperiencePayload>("POST", `/v1/experience/${encodeURIComponent(id)}/open`),
+    openExperience: (id: string, options?: { surface?: ApplicationSurfaceType }) =>
+      request<OpenExperiencePayload>("POST", `/v1/experience/${encodeURIComponent(id)}/open`, {
+        surface: options?.surface === "MANAGEMENT" ? "MANAGEMENT" : "PUBLIC",
+      }),
   };
 }
 
