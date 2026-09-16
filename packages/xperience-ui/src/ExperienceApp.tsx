@@ -12,6 +12,14 @@ import {
   type XperienceApiClient,
 } from "@digiconomy/xperience-sdk";
 import { getSpeechRecognition, type SpeechRecognition, type VoiceState } from "./speech.js";
+import {
+  EXPERIENCE_ESCAPE_EVENT,
+  attachTwoFingerHorizontalEscape,
+  escapeThresholdsForViewport,
+  markExperienceEscapeHintSeen,
+  shouldShowExperienceEscapeHint,
+  vibrateEscapeFeedback,
+} from "./experience-escape.js";
 import "./styles.css";
 
 export interface ExperienceAppProps {
@@ -152,14 +160,18 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [stopTarget, setStopTarget] = useState<ExperienceMembershipView | null>(null);
   const [frameFailed, setFrameFailed] = useState(false);
+  const [escapeHint, setEscapeHint] = useState(false);
+  const [exitingExperience, setExitingExperience] = useState(false);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceText, setVoiceText] = useState("");
   const [voiceMessage, setVoiceMessage] = useState("Say what you want to do.");
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 960px)").matches);
   const [offline, setOffline] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const immersiveRef = useRef<HTMLDivElement | null>(null);
   const screenRef = useRef(screen);
   const stackRef = useRef(screenStack);
+  const exitingRef = useRef(false);
   screenRef.current = screen;
   stackRef.current = screenStack;
 
@@ -256,6 +268,50 @@ export function ExperienceApp(props: ExperienceAppProps) {
     props.onHardwareBackReady?.(handleHardwareBack);
   }, [props, handleHardwareBack]);
 
+  const exitExperienceToHome = useCallback(() => {
+    if (exitingRef.current) return;
+    if (screenRef.current !== "experience") return;
+    exitingRef.current = true;
+    setExitingExperience(true);
+    vibrateEscapeFeedback();
+    window.setTimeout(() => {
+      setOpened(null);
+      setFrameFailed(false);
+      setEscapeHint(false);
+      setExitingExperience(false);
+      exitingRef.current = false;
+      setScreen("home");
+      setScreenStack([]);
+    }, 220);
+  }, []);
+
+  useEffect(() => {
+    const onEscape = () => exitExperienceToHome();
+    window.addEventListener(EXPERIENCE_ESCAPE_EVENT, onEscape);
+    return () => window.removeEventListener(EXPERIENCE_ESCAPE_EVENT, onEscape);
+  }, [exitExperienceToHome]);
+
+  useEffect(() => {
+    if (screen !== "experience" || !opened) return;
+    if (shouldShowExperienceEscapeHint()) {
+      setEscapeHint(true);
+      const hide = window.setTimeout(() => {
+        setEscapeHint(false);
+        markExperienceEscapeHintSeen();
+      }, 3200);
+      return () => window.clearTimeout(hide);
+    }
+    setEscapeHint(false);
+    return undefined;
+  }, [screen, opened?.applicationId]);
+
+  useEffect(() => {
+    if (screen !== "experience" || !opened) return;
+    const node = immersiveRef.current;
+    if (!node) return;
+    return attachTwoFingerHorizontalEscape(node, exitExperienceToHome, escapeThresholdsForViewport());
+  }, [screen, opened, exitExperienceToHome]);
+
   const openHttps = useCallback(
     (url: string) => {
       if (openExternalUrl) {
@@ -306,6 +362,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
       const payload = await api.openExperience(app.id);
       setOpened(payload);
       setFrameFailed(false);
+      setExitingExperience(false);
+      exitingRef.current = false;
       navigate("experience");
       await refreshMemberships();
     } catch (reason) {
@@ -564,6 +622,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
       {screen === "profile" ? <div className="ox-screen">
         <PageHeader eyebrow="PARTICIPANT" title="Profile" copy="Your participant information for this OS Experience." />
         <section className="ox-profile-card"><span className="ox-profile-avatar">{initials(participant?.displayName || userName)}</span><div><h2>{participant?.displayName || userName}</h2><p>{participant?.email || "No email provided"}</p></div><dl><div><dt>Participant ID</dt><dd>{participant?.id || userId}</dd></div><div><dt>Role</dt><dd>{participant?.role || "USER"}</dd></div></dl></section>
+        <section className="ox-help-card">
+          <small>GESTURES</small>
+          <h2>Leave an Experience</h2>
+          <p>While an application fills the screen, swipe left or right with two fingers to return to OS Xperience Home. One-finger swipes and pinch-to-zoom stay with the application. You can also use the system Back control.</p>
+        </section>
       </div> : null}
 
       {screen === "voice" ? <div data-testid="voice" className="ox-screen ox-voice">
@@ -578,40 +641,34 @@ export function ExperienceApp(props: ExperienceAppProps) {
         </section>
       </div> : null}
 
-      {screen === "experience" && opened ? <div data-testid="in-app-experience" className="ox-in-app">
-        <header>
-          <button
-            className="ox-icon-button"
-            aria-label="Close application"
-            onClick={() => {
-              setOpened(null);
-              setFrameFailed(false);
-              navigate("my-experience", { replace: true });
-            }}
-          >
-            <Icon name="back" />
+      {screen === "experience" && opened ? (
+        <div
+          ref={immersiveRef}
+          data-testid="in-app-experience"
+          className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}`}
+        >
+          {escapeHint ? (
+            <div className="ox-escape-hint" role="status">
+              Swipe left or right with two fingers to return to OS Xperience.
+            </div>
+          ) : null}
+          <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
+            Return to OS Xperience Home
           </button>
-          <strong>{opened.name}</strong>
-          <button
-            className="ox-icon-button"
-            type="button"
-            aria-label={`Open ${opened.name} externally`}
-            onClick={() => openHttps(opened.embedUrl)}
-          >
-            <Icon name="more" />
-          </button>
-        </header>
-        {frameFailed ? (
-          <section className="ox-frame-fallback">
-            <h1>This application couldn&apos;t be embedded</h1>
-            <p>It may only allow a full browser window.</p>
-            <button className="ox-button primary" type="button" onClick={() => openHttps(opened.embedUrl)}>
-              Open externally
-            </button>
-          </section>
-        ) : (
-          <>
+          {frameFailed ? (
+            <section className="ox-frame-fallback ox-immersive-fallback">
+              <h1>This application couldn&apos;t be embedded</h1>
+              <p>It may only allow a full browser window.</p>
+              <button className="ox-button primary" type="button" onClick={() => openHttps(opened.embedUrl)}>
+                Open externally
+              </button>
+              <button className="ox-button secondary" type="button" onClick={exitExperienceToHome}>
+                Back to Home
+              </button>
+            </section>
+          ) : (
             <iframe
+              className="ox-immersive-frame"
               title={opened.name}
               src={opened.embedUrl}
               sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
@@ -620,22 +677,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
               onLoad={(event) => {
                 try {
                   const frame = event.currentTarget;
-                  // Same-origin only; cross-origin load success still means the document arrived.
                   void frame.contentWindow?.location.href;
                 } catch {
                   /* cross-origin embed succeeded */
                 }
               }}
             />
-            <aside className="ox-frame-note">
-              Having trouble?{" "}
-              <button type="button" className="ox-text-link" onClick={() => openHttps(opened.embedUrl)}>
-                Open externally
-              </button>
-            </aside>
-          </>
-        )}
-      </div> : null}
+          )}
+        </div>
+      ) : null}
     </main>
 
     {!isDesktop ? <BottomNav screen={screen} go={navigate} /> : null}
