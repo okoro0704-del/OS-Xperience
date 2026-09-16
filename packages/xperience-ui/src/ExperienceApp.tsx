@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import {
   DIRECTORY_CATEGORIES,
   parseExperienceUtterance,
+  type ApplicationSurfaceType,
   type DirectoryApplicationView,
   type ExperienceMembershipView,
   type OpenExperiencePayload,
@@ -142,19 +143,25 @@ function AppCard({
   onSelect,
   onPrimary,
   busy,
+  dense = false,
 }: {
   app: DirectoryApplicationView;
   onSelect: () => void;
   onPrimary: () => void;
   busy: boolean;
+  dense?: boolean;
 }) {
-  return <article className="ox-app-card">
+  return <article className={`ox-app-card${dense ? " is-dense" : ""}`}>
     <button className="ox-card-main" onClick={onSelect} aria-label={`View ${app.name} details`}>
-      <AppGlyph app={app} />
-      <span><small>{app.category}</small><strong>{app.name}</strong><p>{app.description || "No description provided."}</p></span>
+      <AppGlyph app={app} compact={dense} />
+      <span>
+        <small>{app.category}</small>
+        <strong>{app.name}</strong>
+        {!dense ? <p>{app.description || "No description provided."}</p> : null}
+      </span>
     </button>
     <div className="ox-card-footer">
-      <span>{app.developerName || "Published application"}</span>
+      {!dense ? <span>{app.developerName || "Published application"}</span> : <span />}
       <div className="ox-card-actions">
         <button
           type="button"
@@ -535,7 +542,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         await api.startExperience(app.id);
       }
       markLaunch(trace, "destination");
-      const payload = await api.openExperience(app.id);
+      const payload = await api.openExperience(app.id, { surface: "PUBLIC" });
       markLaunch(trace, "response");
       setOpened(payload);
       setLaunchingApp(null);
@@ -552,10 +559,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
     }
   }, [api, refreshMemberships, navigate]);
 
-  const openApplication = useCallback(async (app: DirectoryApplicationView) => {
+  const openApplication = useCallback(async (app: DirectoryApplicationView, surface: ApplicationSurfaceType = "PUBLIC") => {
     if (!app.experienced) {
       setSelected(app);
       navigate("detail");
+      return;
+    }
+    if (surface === "MANAGEMENT" && !app.canManage) {
+      setError("Management access is not available for this application.");
       return;
     }
     const trace = beginLaunchTrace(app);
@@ -573,7 +584,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     navigate("experience");
     try {
       markLaunch(trace, "request");
-      const payload = await api.openExperience(app.id);
+      const payload = await api.openExperience(app.id, { surface });
       markLaunch(trace, "response");
       markLaunch(trace, "destination");
       setOpened(payload);
@@ -584,7 +595,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setLaunchingApp(null);
       setOpened(null);
       setError(reason instanceof Error ? reason.message : `Could not open ${app.name}.`);
-      navigate("my-experience");
+      navigate(surface === "MANAGEMENT" ? "detail" : "my-experience");
     } finally {
       setBusyId(null);
     }
@@ -750,20 +761,24 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }).sort((a, b) => membershipFilter === "Recently Used"
     ? new Date(b.lastOpenedAt ?? 0).getTime() - new Date(a.lastOpenedAt ?? 0).getTime()
     : 0);
-  const continueItems = memberships.filter((item) => item.status === "ACTIVE");
+  const continueItems = [...memberships]
+    .filter((item) => item.status === "ACTIVE")
+    .sort((a, b) => new Date(b.lastOpenedAt ?? b.addedAt).getTime() - new Date(a.lastOpenedAt ?? a.addedAt).getTime())
+    .slice(0, 4);
+  const forYouItems = featured.slice(0, 4);
 
-  const renderGrid = (apps: DirectoryApplicationView[], options?: { home?: boolean }) => loading
+  const renderGrid = (apps: DirectoryApplicationView[], options?: { home?: boolean; dense?: boolean }) => loading
     ? <Skeletons count={options?.home ? 4 : 6} home={options?.home} />
     : apps.length === 0
     ? <div className="ox-inline-empty"><p>No applications match this view.</p></div>
-    : <div className={`ox-grid${options?.home ? " ox-home-grid" : ""}`}>{apps.map((app) => <AppCard key={app.id} app={app} busy={busyId === app.id} onSelect={() => {
+    : <div className={`ox-grid${options?.home ? " ox-home-grid" : ""}${options?.dense ? " ox-dense-grid" : ""}`}>{apps.map((app) => <AppCard key={app.id} app={app} dense={Boolean(options?.home || options?.dense)} busy={busyId === app.id} onSelect={() => {
       const scroller = mainScrollRef.current;
       if (scroller && (screen === "directory" || screen === "search" || screen === "home")) {
         directoryScrollRef.current = scroller.scrollTop;
       }
       setSelected(app);
       navigate("detail");
-    }} onPrimary={() => void (app.experienced ? openApplication(app) : startApplication(app))} />)}</div>;
+    }} onPrimary={() => void (app.experienced ? openApplication(app, "PUBLIC") : startApplication(app))} />)}</div>;
 
   function PageHeader({ eyebrow, title, copy }: { eyebrow?: string; title: string; copy?: string }) {
     return <header className="ox-page-header">{eyebrow ? <small>{eyebrow}</small> : null}<h1>{title}</h1>{copy ? <p>{copy}</p> : null}</header>;
@@ -808,30 +823,32 @@ export function ExperienceApp(props: ExperienceAppProps) {
       {error && screen !== "experience" ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
       {screen === "home" ? <div data-testid="home" className="ox-screen ox-home">
-        <form data-testid="home-search" className="ox-home-search ox-objective" onSubmit={submitObjective}>
-          <Icon name="search" />
-          <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="What would you like to do?" aria-label="Your objective" />
-          <button type="button" aria-label="Use voice" onClick={() => navigate("voice")}><Icon name="voice" /></button>
-          <button type="submit">Go</button>
-        </form>
+        <div className="ox-home-search-wrap">
+          <form data-testid="home-search" className="ox-home-search ox-objective" onSubmit={submitObjective}>
+            <Icon name="search" />
+            <input value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="What do you want to do?" aria-label="Your objective" />
+            <button type="button" aria-label="Use voice" onClick={() => navigate("voice")}><Icon name="voice" /></button>
+            <button type="submit">Go</button>
+          </form>
+        </div>
 
         <section className="ox-section">
-          <div className="ox-section-heading"><div><small>PICK UP WHERE YOU LEFT OFF</small><h2>Continue Your Xperience</h2></div><button onClick={() => navigate("my-experience")}>See all <span>→</span></button></div>
-          {loading ? <Skeletons count={4} home /> : continueItems.length ? renderGrid(continueItems.slice(0, 4).map((item) => item.application), { home: true }) : <div className="ox-inline-empty"><p>Your active applications will appear here.</p><button onClick={() => navigate("directory")}>Explore Directory</button></div>}
+          <div className="ox-section-heading"><div><h2>Continue</h2></div><button type="button" onClick={() => navigate("my-experience")}>See all <span>→</span></button></div>
+          {loading ? <Skeletons count={4} home /> : continueItems.length ? renderGrid(continueItems.map((item) => item.application), { home: true }) : <div className="ox-inline-empty"><p>Your active applications will appear here.</p><button type="button" onClick={() => navigate("directory")}>Explore Directory</button></div>}
         </section>
 
         <section className="ox-section">
-          <div className="ox-section-heading"><div><small>FOR YOU</small><h2>Recommended for you</h2></div><button data-testid="explore-directory" onClick={() => navigate("directory")}>Explore all <span>→</span></button></div>
-          {renderGrid(featured.slice(0, 4), { home: true })}
-          {!loading && featured.length === 0 ? <p className="ox-empty-copy">No recommended applications are available right now.</p> : null}
+          <div className="ox-section-heading"><div><h2>For You</h2></div><button type="button" data-testid="explore-directory" onClick={() => navigate("directory")}>See all <span>→</span></button></div>
+          {renderGrid(forYouItems, { home: true })}
+          {!loading && forYouItems.length === 0 ? <p className="ox-empty-copy">No directory applications are available right now.</p> : null}
         </section>
       </div> : null}
 
       {screen === "directory" ? <div data-testid="directory" className="ox-screen">
-        <PageHeader eyebrow="DISCOVER YOUR DIGITAL WORLD" title="Directory" copy="Browse published applications and build your Xperience." />
+        <PageHeader title="Directory" />
         <form className="ox-search" onSubmit={searchApplications}><Icon name="search" /><input data-testid="search-input" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search applications" /><button>Search</button></form>
         <div className="ox-filter-row" aria-label="Directory categories">{DIRECTORY_CATEGORIES.map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}</button>)}</div>
-        {renderGrid(filteredDirectory)}
+        {renderGrid(filteredDirectory, { dense: true })}
         {!loading && filteredDirectory.length === 0 ? <div className="ox-inline-empty"><p>No applications match this category.</p><button onClick={() => setCategory("All")}>Show all</button></div> : null}
       </div> : null}
 
@@ -869,36 +886,62 @@ export function ExperienceApp(props: ExperienceAppProps) {
               <div><dt>Directory source</dt><dd>{selected.ecosystemSource === "LIFEOS" ? "LifeOS catalog" : "Xperience publication"}</dd></div>
             ) : null}
           </dl>
-          <button
-            className="ox-button primary wide"
-            disabled={busyId === selected.id}
-            onClick={() => void (selected.experienced ? openApplication(selected) : startApplication(selected))}
-          >
-            {busyId === selected.id ? "Opening…" : selected.experienced ? "Open" : "Xperience"}
-          </button>
-          {selected.experienced ? (
-            <button
-              type="button"
-              className="ox-button secondary wide"
-              style={{ marginTop: 10 }}
-              onClick={() => {
-                const membership = memberships.find((m) => m.applicationId === selected.id);
-                if (membership) setStopTarget(membership);
-              }}
-            >
-              Unxperience
-            </button>
-          ) : null}
+          <div className="ox-detail-actions">
+            {!selected.experienced ? (
+              <button
+                className="ox-button primary wide"
+                disabled={busyId === selected.id}
+                onClick={() => void startApplication(selected)}
+              >
+                {busyId === selected.id ? "Opening…" : "Xperience"}
+              </button>
+            ) : (
+              <>
+                <button
+                  className="ox-button primary wide"
+                  disabled={busyId === selected.id}
+                  onClick={() => void openApplication(selected, "PUBLIC")}
+                >
+                  {busyId === selected.id ? "Opening…" : "Open"}
+                </button>
+                {selected.canManage ? (
+                  <button
+                    type="button"
+                    className="ox-button secondary wide"
+                    disabled={busyId === selected.id}
+                    onClick={() => void openApplication(selected, "MANAGEMENT")}
+                  >
+                    Manage
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="ox-button ghost wide"
+                  onClick={() => {
+                    const membership = memberships.find((m) => m.applicationId === selected.id);
+                    if (membership) setStopTarget(membership);
+                  }}
+                >
+                  Remove from My Xperience
+                </button>
+              </>
+            )}
+          </div>
         </section>
       </div> : screen === "detail" ? <div className="ox-screen ox-detail"><BackButton /><div className="ox-inline-empty"><p>Select an application from Directory.</p></div></div> : null}
 
       {screen === "my-experience" ? <div data-testid="my-experience" className="ox-screen">
-        <PageHeader eyebrow="YOUR DIGITAL SPACE" title="My Xperience" copy="The applications you have chosen, together in one place." />
+        <PageHeader title="My Xperience" />
         <div className="ox-filter-row">{(["All", "Active", "Paused", "Recently Used"] as MembershipFilter[]).map((item) => <button className={membershipFilter === item ? "active" : ""} key={item} onClick={() => setMembershipFilter(item)}>{item}</button>)}</div>
         {loading ? <Skeletons /> : filteredMemberships.length ? <div className="ox-memberships">{filteredMemberships.map((item) => <article key={item.applicationId}>
           <AppGlyph compact app={item.application} /><div><strong>{item.application.name}</strong><small><i className={`ox-status ${item.status.toLowerCase()}`} />{item.status === "ACTIVE" ? "Active" : item.status === "PAUSED" ? "Paused" : "Unavailable"}{item.lastOpenedAt ? ` · Used ${new Date(item.lastOpenedAt).toLocaleDateString()}` : ""}</small></div>
-          <button className="ox-button compact" disabled={item.status === "UNAVAILABLE" || busyId === item.applicationId} onClick={() => void openApplication(item.application)}>Open</button>
-          <button className="ox-icon-button" aria-label={`Unxperience ${item.application.name}`} onClick={() => setStopTarget(item)}><Icon name="more" /></button>
+          <div className="ox-membership-actions">
+            <button className="ox-button compact" disabled={item.status === "UNAVAILABLE" || busyId === item.applicationId} onClick={() => void openApplication(item.application, "PUBLIC")}>Open</button>
+            {item.application.canManage ? (
+              <button className="ox-button compact secondary" disabled={item.status === "UNAVAILABLE" || busyId === item.applicationId} onClick={() => void openApplication(item.application, "MANAGEMENT")}>Manage</button>
+            ) : null}
+          </div>
+          <button className="ox-icon-button" aria-label={`Remove ${item.application.name} from My Xperience`} onClick={() => setStopTarget(item)}><Icon name="more" /></button>
         </article>)}</div> : <section className="ox-state"><span>◇</span><h2>Your Xperience is ready to grow</h2><p>Add an application from Directory to see it here.</p><button className="ox-button primary" onClick={() => navigate("directory")}>Explore Directory</button></section>}
       </div> : null}
 
