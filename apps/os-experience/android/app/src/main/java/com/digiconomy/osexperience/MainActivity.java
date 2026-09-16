@@ -291,6 +291,8 @@ public class MainActivity extends BridgeActivity {
     webView.post(() -> webView.evaluateJavascript(
       "(function(){"
         + "if(window.__oxExperienceActive===false)return;"
+        /* When Navigation Labs owns a non-two-finger experiment, skip host two-finger exit. */
+        + "if(window.__oxNavLabsEnabled&&window.__oxNavLabsExperiment&&window.__oxNavLabsExperiment!=='two-finger-sweep')return;"
         + "window.dispatchEvent(new CustomEvent('ox-experience-escape',{detail:{source:'android-host'}}));"
         + "})();",
       null

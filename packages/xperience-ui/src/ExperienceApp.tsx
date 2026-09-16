@@ -28,6 +28,17 @@ import {
   type AirNavDebugSnapshot,
   type AirNavigationController,
 } from "./air-navigation.js";
+import {
+  NAV_LABS_BUILD_ID,
+  attachNavLabsController,
+  getActiveExperiment,
+  getLabsConfig,
+  isLabsDiagnosticsOn,
+  isNavLabsEnabled,
+  type ExperimentId,
+  type NavLabsHud,
+} from "./nav-labs/index.js";
+import { NavigationLabsPanel } from "./nav-labs/NavigationLabsPanel.js";
 import "./styles.css";
 
 declare global {
@@ -55,6 +66,7 @@ type Screen =
   | "directory"
   | "my-experience"
   | "profile"
+  | "labs"
   | "search"
   | "detail"
   | "experience"
@@ -184,6 +196,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [gestureDebug, setGestureDebug] = useState<string>("");
   const [exitProbe, setExitProbe] = useState<"idle" | "requested" | "home">("idle");
   const [pointerCount, setPointerCount] = useState(0);
+  const [labsEnabled, setLabsEnabledState] = useState(() => isNavLabsEnabled());
+  const [labsExperiment, setLabsExperiment] = useState<ExperimentId | null>(() => getActiveExperiment());
+  const [labsHud, setLabsHud] = useState<NavLabsHud | null>(null);
+  const [labsDiagnostics, setLabsDiagnostics] = useState(() => isLabsDiagnosticsOn());
+  const [navProgress, setNavProgress] = useState(0);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceText, setVoiceText] = useState("");
   const [voiceMessage, setVoiceMessage] = useState("Say what you want to do.");
@@ -277,7 +294,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setScreenStack((stack) => stack.filter((item) => item !== "detail"));
       return true;
     }
-    if (current === "voice" || current === "search" || current === "profile" || current === "directory" || current === "my-experience") {
+    if (current === "voice" || current === "search" || current === "profile" || current === "labs" || current === "directory" || current === "my-experience") {
       const stack = stackRef.current;
       const previous = [...stack].reverse().find((item) => item !== current) ?? "home";
       setScreenStack((items) => items.filter((item) => item !== current));
@@ -314,13 +331,16 @@ export function ExperienceApp(props: ExperienceAppProps) {
   useEffect(() => {
     window.__oxExperienceActive = screen === "experience";
     window.__oxExitExperienceToHome = exitExperienceToHome;
+    (window as Window & { __oxNavLabsEnabled?: boolean; __oxNavLabsExperiment?: string | null }).__oxNavLabsEnabled =
+      labsEnabled;
+    (window as Window & { __oxNavLabsExperiment?: string | null }).__oxNavLabsExperiment = labsExperiment;
     return () => {
       window.__oxExperienceActive = false;
       if (window.__oxExitExperienceToHome === exitExperienceToHome) {
         delete window.__oxExitExperienceToHome;
       }
     };
-  }, [screen, exitExperienceToHome]);
+  }, [screen, exitExperienceToHome, labsEnabled, labsExperiment]);
 
   useEffect(() => {
     const onEscape = () => exitExperienceToHome();
@@ -347,13 +367,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setAirGrabbed(false);
       return;
     }
+    /* When Navigation Labs owns an air experiment, skip legacy auto air-nav. */
+    if (labsEnabled && (labsExperiment === "air-swipe" || labsExperiment === "palm-fist-throw")) return;
     if (!airEnabled) return;
     let cancelled = false;
     void startAirNavigation({
       onExitHome: exitExperienceToHome,
       onGrabbed: setAirGrabbed,
       onDebug: (snap) => {
-        if (isAirNavigationDebug()) setAirDebug(snap);
+        if (isAirNavigationDebug() || labsDiagnostics) setAirDebug(snap);
       },
     }).then((controller) => {
       if (cancelled) {
@@ -368,7 +390,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       airNavRef.current = null;
       setAirGrabbed(false);
     };
-  }, [screen, opened, airEnabled, exitExperienceToHome]);
+  }, [screen, opened, airEnabled, exitExperienceToHome, labsEnabled, labsExperiment, labsDiagnostics]);
 
   useEffect(() => {
     if (screen !== "experience" || !opened) return;
@@ -386,10 +408,40 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
   useEffect(() => {
     if (screen !== "experience" || !opened) return;
+    /* Labs two-finger experiment owns recognition when enabled. */
+    if (labsEnabled && labsExperiment === "two-finger-sweep") return;
+    if (labsEnabled && labsExperiment) return; /* other labs experiments: no legacy two-finger */
     const node = immersiveRef.current;
     if (!node) return;
     return attachTwoFingerHorizontalEscape(node, exitExperienceToHome, escapeThresholdsForViewport());
-  }, [screen, opened, exitExperienceToHome]);
+  }, [screen, opened, exitExperienceToHome, labsEnabled, labsExperiment]);
+
+  useEffect(() => {
+    if (screen !== "experience" || !opened) {
+      setLabsHud(null);
+      setNavProgress(0);
+      return;
+    }
+    if (!labsEnabled || !labsExperiment) {
+      setLabsHud(null);
+      return;
+    }
+    const node = immersiveRef.current;
+    if (!node) return;
+    const config = getLabsConfig();
+    return attachNavLabsController({
+      host: node,
+      experiment: labsExperiment,
+      enabled: true,
+      config,
+      onExitHome: exitExperienceToHome,
+      onGrabbed: setAirGrabbed,
+      onHud: (hud) => {
+        setLabsHud(hud);
+        if (typeof hud.progress === "number") setNavProgress(hud.progress);
+      },
+    });
+  }, [screen, opened, labsEnabled, labsExperiment, exitExperienceToHome]);
 
   const openHttps = useCallback(
     (url: string) => {
@@ -704,10 +756,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
         <section className="ox-help-card">
           <small>GESTURES</small>
           <h2>Leave an Experience</h2>
-          <p>While an application fills the screen, swipe left or right with two fingers to return to OS Xperience Home. One-finger swipes and pinch-to-zoom stay with the application. You can also use the system Back control.</p>
-          <p style={{ marginTop: 10 }}>With Air Navigation enabled: show an open palm, close to a fist, then throw left or right to return Home. Camera frames stay on this device.</p>
+          <p>While an application fills the screen, use system Back or an enabled Navigation Labs experiment to return Home. One-finger interaction stays with the application.</p>
           <label className="ox-toggle-row">
-            <span>Air Navigation</span>
+            <span>Air Navigation (legacy)</span>
             <input
               type="checkbox"
               checked={airEnabled}
@@ -719,7 +770,36 @@ export function ExperienceApp(props: ExperienceAppProps) {
             />
           </label>
         </section>
+        <section className="ox-help-card">
+          <small>RESEARCH</small>
+          <h2>Xperience Labs</h2>
+          <p>Experimental navigation techniques for real-device testing. Not final consumer design.</p>
+          <button
+            type="button"
+            className="ox-button primary wide"
+            data-testid="open-nav-labs"
+            onClick={() => {
+              setLabsEnabledState(isNavLabsEnabled());
+              setLabsExperiment(getActiveExperiment());
+              setLabsDiagnostics(isLabsDiagnosticsOn());
+              navigate("labs");
+            }}
+          >
+            Navigation Experiments
+          </button>
+        </section>
       </div> : null}
+
+      {screen === "labs" ? (
+        <NavigationLabsPanel
+          onBack={() => {
+            setLabsEnabledState(isNavLabsEnabled());
+            setLabsExperiment(getActiveExperiment());
+            setLabsDiagnostics(isLabsDiagnosticsOn());
+            navigate("profile");
+          }}
+        />
+      ) : null}
 
       {screen === "voice" ? <div data-testid="voice" className="ox-screen ox-voice">
         <button className="ox-voice-close" onClick={() => navigate("home")} aria-label="Close voice"><Icon name="back" /> Back</button>
@@ -734,73 +814,82 @@ export function ExperienceApp(props: ExperienceAppProps) {
       </div> : null}
 
       {screen === "experience" && opened ? (
-        <div
-          ref={immersiveRef}
-          data-testid="in-app-experience"
-          className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}${airGrabbed ? " is-grabbed" : ""}`}
-        >
-          {escapeHint ? (
-            <div className="ox-escape-hint" role="status">
-              Swipe left or right with two fingers to return to OS Xperience.
+        <>
+          {labsEnabled ? (
+            <div className="ox-nav-peek" aria-hidden="true">
+              <strong>OS Experience</strong>
+              <span>Home</span>
             </div>
           ) : null}
-          {isAirNavigationDebug() ? (
-            <div className="ox-dev-debug" aria-hidden="true">
-              <div>EXPERIENCE: ACTIVE</div>
-              <div>EXIT PRIMITIVE: {typeof window.__oxExitExperienceToHome === "function" ? "READY" : "ERROR"}</div>
-              <div>EXIT: {exitProbe.toUpperCase()}</div>
-              <div>POINTERS: {pointerCount}</div>
-              <div>TOUCH: {gestureDebug || "none"}</div>
-              <div>AIR FEATURE: {airEnabled ? "ON" : "OFF"}</div>
-              <div>CAMERA: {(airDebug?.camera || (airEnabled ? "…" : "off")).toUpperCase()}</div>
-              <div>HAND: {(airDebug?.hand || "none").toUpperCase()}</div>
-              <div>GESTURE: {(airDebug?.gesture || "none").toUpperCase()}</div>
-              <div>STATE: {(airDebug?.state || "idle").toUpperCase()}</div>
-              <div>MOTION: {(airDebug?.motion || "none").toUpperCase()}</div>
-              {airDebug?.action ? <div>ACTION: {airDebug.action}</div> : null}
-              {!airEnabled ? <div>HINT: enable Air Navigation in Profile</div> : null}
-              <button
-                type="button"
-                className="ox-dev-probe"
-                onClick={() => exitExperienceToHome()}
-              >
-                PROBE exitExperienceToHome
-              </button>
-            </div>
-          ) : null}
-          <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
-            Return to OS Xperience Home
-          </button>
-          {frameFailed ? (
-            <section className="ox-frame-fallback ox-immersive-fallback">
-              <h1>This application couldn&apos;t be embedded</h1>
-              <p>It may only allow a full browser window.</p>
-              <button className="ox-button primary" type="button" onClick={() => openHttps(opened.embedUrl)}>
-                Open externally
-              </button>
-              <button className="ox-button secondary" type="button" onClick={exitExperienceToHome}>
-                Back to Home
-              </button>
-            </section>
-          ) : (
-            <iframe
-              className="ox-immersive-frame"
-              title={opened.name}
-              src={opened.embedUrl}
-              sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-              referrerPolicy="strict-origin-when-cross-origin"
-              onError={() => setFrameFailed(true)}
-              onLoad={(event) => {
-                try {
-                  const frame = event.currentTarget;
-                  void frame.contentWindow?.location.href;
-                } catch {
-                  /* cross-origin embed succeeded */
-                }
-              }}
-            />
-          )}
-        </div>
+          <div
+            ref={immersiveRef}
+            data-testid="in-app-experience"
+            className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}${airGrabbed ? " is-grabbed" : ""}${navProgress > 0.02 ? " is-nav-dragging" : ""}`}
+          >
+            {escapeHint && !labsEnabled ? (
+              <div className="ox-escape-hint" role="status">
+                Swipe left or right with two fingers to return to OS Xperience.
+              </div>
+            ) : null}
+            {labsEnabled ? (
+              <div className="ox-labs-chrome">
+                <button type="button" className="ox-button compact" onClick={() => exitExperienceToHome()}>
+                  TEST EXIT TO HOME
+                </button>
+                <span className="ox-labs-chrome-id">{NAV_LABS_BUILD_ID}</span>
+              </div>
+            ) : null}
+            {(labsEnabled && labsDiagnostics) || isAirNavigationDebug() ? (
+              <div className="ox-dev-debug" aria-hidden="true">
+                <div>XPERIENCE NAV LAB</div>
+                <div>BUILD: {NAV_LABS_BUILD_ID}</div>
+                <div>EXPERIMENT: {(labsExperiment || "none").toUpperCase()}</div>
+                <div>STATE: {(labsHud?.state || "idle").toUpperCase()}</div>
+                <div>PROGRESS: {typeof labsHud?.progress === "number" ? labsHud.progress.toFixed(2) : "—"}</div>
+                {labsHud?.detail ? <div>DETAIL: {labsHud.detail}</div> : null}
+                <div>EXIT PRIMITIVE: {typeof window.__oxExitExperienceToHome === "function" ? "READY" : "ERROR"}</div>
+                <div>EXIT: {exitProbe.toUpperCase()}</div>
+                <div>POINTERS: {pointerCount}</div>
+                <div>TOUCH: {gestureDebug || "none"}</div>
+                <div>AIR LEGACY: {airEnabled ? "ON" : "OFF"}</div>
+                <div>CAMERA: {(airDebug?.camera || "off").toUpperCase()}</div>
+                <div>HAND: {(airDebug?.hand || "none").toUpperCase()}</div>
+              </div>
+            ) : null}
+            <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
+              Return to OS Xperience Home
+            </button>
+            {frameFailed ? (
+              <section className="ox-frame-fallback ox-immersive-fallback">
+                <h1>This application couldn&apos;t be embedded</h1>
+                <p>It may only allow a full browser window.</p>
+                <button className="ox-button primary" type="button" onClick={() => openHttps(opened.embedUrl)}>
+                  Open externally
+                </button>
+                <button className="ox-button secondary" type="button" onClick={exitExperienceToHome}>
+                  Back to Home
+                </button>
+              </section>
+            ) : (
+              <iframe
+                className="ox-immersive-frame"
+                title={opened.name}
+                src={opened.embedUrl}
+                sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+                referrerPolicy="strict-origin-when-cross-origin"
+                onError={() => setFrameFailed(true)}
+                onLoad={(event) => {
+                  try {
+                    const frame = event.currentTarget;
+                    void frame.contentWindow?.location.href;
+                  } catch {
+                    /* cross-origin embed succeeded */
+                  }
+                }}
+              />
+            )}
+          </div>
+        </>
       ) : null}
     </main>
 
