@@ -89,8 +89,8 @@ function ErrorBanner({ message, onRetry }: { message?: string | null; onRetry: (
   );
 }
 
-function Skeletons({ count = 4 }: { count?: number }) {
-  return <div className="ox-grid ox-skeleton-grid" aria-label="Loading applications">{Array.from({ length: count }, (_, index) => <div className="ox-skeleton" key={index}><i /><b /><span /></div>)}</div>;
+function Skeletons({ count = 4, home = false }: { count?: number; home?: boolean }) {
+  return <div className={`ox-grid ox-skeleton-grid${home ? " ox-home-grid" : ""}`} aria-label="Loading applications">{Array.from({ length: count }, (_, index) => <div className="ox-skeleton" key={index}><i /><b /><span /></div>)}</div>;
 }
 
 function AppCard({
@@ -477,9 +477,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
     : 0);
   const continueItems = memberships.filter((item) => item.status === "ACTIVE");
 
-  const renderGrid = (apps: DirectoryApplicationView[]) => loading
-    ? <Skeletons />
-    : <div className="ox-grid">{apps.map((app) => <AppCard key={app.id} app={app} busy={busyId === app.id} onSelect={() => { setSelected(app); navigate("detail"); }} onPrimary={() => void (app.experienced ? openApplication(app) : startApplication(app))} />)}</div>;
+  const renderGrid = (apps: DirectoryApplicationView[], options?: { home?: boolean }) => loading
+    ? <Skeletons count={4} home={options?.home} />
+    : <div className={`ox-grid${options?.home ? " ox-home-grid" : ""}`}>{apps.map((app) => <AppCard key={app.id} app={app} busy={busyId === app.id} onSelect={() => { setSelected(app); navigate("detail"); }} onPrimary={() => void (app.experienced ? openApplication(app) : startApplication(app))} />)}</div>;
 
   function PageHeader({ eyebrow, title, copy }: { eyebrow?: string; title: string; copy?: string }) {
     return <header className="ox-page-header">{eyebrow ? <small>{eyebrow}</small> : null}<h1>{title}</h1>{copy ? <p>{copy}</p> : null}</header>;
@@ -517,12 +517,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
         <section className="ox-section">
           <div className="ox-section-heading"><div><small>PICK UP WHERE YOU LEFT OFF</small><h2>Continue Your Experience</h2></div><button onClick={() => navigate("my-experience")}>See all <span>→</span></button></div>
-          {loading ? <Skeletons count={4} /> : continueItems.length ? <div className="ox-continue-row">{continueItems.slice(0, 4).map((item) => <button key={item.applicationId} onClick={() => void openApplication(item.application)}><AppGlyph compact app={item.application} /><span><strong>{item.application.name}</strong><small>{item.application.category}</small></span><em>Open →</em></button>)}</div> : <div className="ox-inline-empty"><p>Your active applications will appear here.</p><button onClick={() => navigate("directory")}>Explore Directory</button></div>}
+          {loading ? <Skeletons count={4} home /> : continueItems.length ? renderGrid(continueItems.slice(0, 4).map((item) => item.application), { home: true }) : <div className="ox-inline-empty"><p>Your active applications will appear here.</p><button onClick={() => navigate("directory")}>Explore Directory</button></div>}
         </section>
 
         <section className="ox-section">
           <div className="ox-section-heading"><div><small>FOR YOU</small><h2>Recommended for you</h2></div><button data-testid="explore-directory" onClick={() => navigate("directory")}>Explore all <span>→</span></button></div>
-          {renderGrid(featured.slice(0, 4))}
+          {renderGrid(featured.slice(0, 4), { home: true })}
           {!loading && featured.length === 0 ? <p className="ox-empty-copy">No recommended applications are available right now.</p> : null}
         </section>
       </div> : null}
