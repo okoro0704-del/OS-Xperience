@@ -528,7 +528,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         for (const track of stream.getTracks()) track.stop();
       } catch {
         setVoiceState("unavailable");
-        setVoiceMessage("Microphone permission was not granted. Enable it in Android Settings, then return here.");
+        setVoiceMessage("Microphone permission was not granted. Enable it in your device or browser settings, then return here.");
         return;
       }
     }

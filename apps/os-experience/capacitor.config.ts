@@ -1,16 +1,26 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-/** OS Experience native shell — separate from OS Shell (com.digiconomy.osshell). */
+/**
+ * OS Experience native shells — Android + iOS from the SAME web build.
+ * Separate from OS Shell (com.digiconomy.osshell).
+ */
 const config: CapacitorConfig = {
   appId: "com.digiconomy.osexperience",
   appName: "OS Experience",
   webDir: "dist",
   server: {
     androidScheme: "https",
+    iosScheme: "https",
   },
   android: {
     allowMixedContent: false,
     backgroundColor: "#05070f",
+  },
+  ios: {
+    backgroundColor: "#05070f",
+    contentInset: "never",
+    preferredContentMode: "mobile",
+    scrollEnabled: true,
   },
   plugins: {
     SplashScreen: {

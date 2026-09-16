@@ -19,3 +19,14 @@ export {
   startAirNavigation,
 } from "./air-navigation.js";
 export type { AirNavDebugSnapshot, AirNavState } from "./air-navigation.js";
+export {
+  SYSTEM_INSETS_EVENT,
+  applySharedSystemInsets,
+  detectOxPlatformId,
+} from "./platform-contract.js";
+export type {
+  ExperienceEscapeDetail,
+  OxPlatformId,
+  PlatformAdapterCapabilities,
+  SystemInsets,
+} from "./platform-contract.js";

@@ -24,7 +24,6 @@ function NativeShellApp() {
       },
     }).then((cleanup) => {
       detach = cleanup;
-      document.documentElement.classList.add("ox-native-shell");
     });
     return () => detach?.();
   }, []);

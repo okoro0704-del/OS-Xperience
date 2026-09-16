@@ -1,23 +1,29 @@
 /**
- * Thin Capacitor platform bridge for OS Experience.
+ * Thin Capacitor platform adapter for OS Experience.
  * Owns lifecycle, back, splash, status bar, keyboard, network, insets, and external opens.
  * Never exposes credentials, filesystem, or secrets to experienced PWAs.
+ *
+ * Shared layout contract: real system insets → --ox-safe-* (Web / Android / iOS).
+ * Product behavior stays in @digiconomy/xperience-ui.
  */
 import { Capacitor } from "@capacitor/core";
+import {
+  SYSTEM_INSETS_EVENT,
+  applySharedSystemInsets,
+  detectOxPlatformId,
+  type SystemInsets,
+} from "@digiconomy/xperience-ui";
+
+export type { SystemInsets };
 
 export function isNativeShell(): boolean {
   return Capacitor.isNativePlatform();
 }
 
-export type SystemInsets = { top: number; bottom: number; left: number; right: number };
-
 export function applySystemInsets(insets: SystemInsets): void {
-  const root = document.documentElement;
-  root.style.setProperty("--ox-safe-top", `${Math.max(0, insets.top)}px`);
-  root.style.setProperty("--ox-safe-bottom", `${Math.max(0, insets.bottom)}px`);
-  root.style.setProperty("--ox-safe-left", `${Math.max(0, insets.left)}px`);
-  root.style.setProperty("--ox-safe-right", `${Math.max(0, insets.right)}px`);
-  root.dataset.oxInsets = root.dataset.oxInsets || "bridge";
+  applySharedSystemInsets(insets);
+  document.documentElement.dataset.oxInsets =
+    document.documentElement.dataset.oxInsets || "bridge";
 }
 
 export async function openExternalUrl(url: string): Promise<void> {
@@ -43,6 +49,10 @@ export async function attachNativeShellBridge(handlers: {
 }): Promise<() => void> {
   if (!Capacitor.isNativePlatform()) return () => undefined;
 
+  window.__oxPlatformId = detectOxPlatformId();
+  document.documentElement.classList.add("ox-native-shell");
+  document.documentElement.dataset.oxPlatform = window.__oxPlatformId;
+
   const cleanups: Array<() => void> = [];
 
   try {
@@ -63,7 +73,7 @@ export async function attachNativeShellBridge(handlers: {
         handlers.onInsets?.({ top: info.height, bottom: currentBottom, left: 0, right: 0 });
       }
     } catch {
-      /* optional */
+      /* optional — Android/iOS hosts may push WindowInsets / safeArea via JS */
     }
   } catch {
     /* optional */
@@ -75,8 +85,8 @@ export async function attachNativeShellBridge(handlers: {
     applySystemInsets(detail);
     handlers.onInsets?.(detail);
   };
-  window.addEventListener("ox-system-insets", onInsetsEvent);
-  cleanups.push(() => window.removeEventListener("ox-system-insets", onInsetsEvent));
+  window.addEventListener(SYSTEM_INSETS_EVENT, onInsetsEvent);
+  cleanups.push(() => window.removeEventListener(SYSTEM_INSETS_EVENT, onInsetsEvent));
 
   try {
     const { App } = await import("@capacitor/app");
@@ -100,7 +110,7 @@ export async function attachNativeShellBridge(handlers: {
       void state.remove();
     });
   } catch {
-    /* optional */
+    /* optional — iOS has no hardware Back; gesture escape + shared stack remain */
   }
 
   try {

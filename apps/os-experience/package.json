@@ -8,15 +8,20 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview --port 5176",
-    "cap:sync": "npm run build && npx cap sync android",
+    "cap:sync": "npm run build && npx cap sync",
+    "cap:sync:android": "npm run build && npx cap sync android",
+    "cap:sync:ios": "npm run build && npx cap sync ios",
     "cap:android": "npx cap open android",
-    "android:debug": "npm run cap:sync && cd android && gradlew.bat assembleDebug"
+    "cap:ios": "npx cap open ios",
+    "android:debug": "npm run cap:sync:android && cd android && gradlew.bat assembleDebug",
+    "ios:prepare": "npm run cap:sync:ios"
   },
   "dependencies": {
     "@capacitor/android": "^7.2.0",
     "@capacitor/app": "^7.1.2",
     "@capacitor/browser": "^7.0.5",
     "@capacitor/core": "^7.2.0",
+    "@capacitor/ios": "^7.6.9",
     "@capacitor/keyboard": "^7.0.6",
     "@capacitor/network": "^7.0.4",
     "@capacitor/splash-screen": "^7.0.5",

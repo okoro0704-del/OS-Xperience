@@ -23,7 +23,23 @@ The consumer mobile app (`apps/xperience-mobile`) and consumer web app (`apps/os
 - **Xperience** (`apps/xperience-console`) — developer/admin registration and review
 - **OS Shell** (`apps/web`) — thin operating surface; remains a separate product and must not be confused with OS Experience consumer UI
 
-**Shared presentation:** Web/PWA and mobile consumers render the same `ExperienceApp` from `packages/xperience-ui` (design tokens + interaction language). OS Experience Android packaging uses Capacitor under `apps/os-experience` (`com.digiconomy.osexperience`), separate from OS Shell Android (`com.digiconomy.osshell`). iOS packaging is prepared via the same Capacitor config when a macOS/Xcode environment is available.
+**Shared presentation:** Web/PWA, Android, and iOS consumers render the same `ExperienceApp` from `packages/xperience-ui` (design tokens + interaction language). Packaging uses Capacitor under `apps/os-experience` (`com.digiconomy.osexperience`) for **both** `android/` and `ios/` from one web build — separate from OS Shell (`com.digiconomy.osshell`).
+
+### Cross-platform constitution
+
+OS Xperience is **one product** with three distributions:
+
+| Layer | Owns |
+|-------|------|
+| Shared core (`packages/xperience-ui`) | Home, Directory, My Experience, Profile, ExperienceMode, `exitExperienceToHome()`, two-finger classifier, Air Navigation engine, design system |
+| Platform adapters (`apps/os-experience`) | Safe areas / insets, system Back, lifecycle, camera/mic permissions, packaging |
+| Web/PWA | `env(safe-area-inset-*)`, browser permissions, service worker |
+| Android shell | `WindowInsets` → `--ox-safe-*`, host two-finger over WebView, APK |
+| iOS shell | WKWebView safe areas / contentInset, IPA when macOS/Xcode available |
+
+Build: shared web → `cap sync` → Android Gradle and/or iOS Xcode. Do not fork UI per platform.
+
+Platform matrix values: ✓ verified, NV = not verified on that runtime (never report PASS for NV).
 
 
 Authentication is a provider boundary. Production resolves through the Trust ID-compatible provider and fails closed until that provider is connected. The development adapter is available only with both `NODE_ENV=development` and `XPERIENCE_DEV_AUTH=true`; it is not an identity system and never proves application control.

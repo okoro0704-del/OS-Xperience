@@ -14,6 +14,9 @@ apps/os-experience/android/.gradle
 apps/os-experience/android/app/build
 apps/os-experience/android/build
 apps/os-experience/android/local.properties
+apps/os-experience/ios/App/Pods
+apps/os-experience/ios/App/App/public
+apps/os-experience/ios/DerivedData
 *.jks
 *.keystore
 .idea
