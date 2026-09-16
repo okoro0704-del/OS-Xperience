@@ -298,7 +298,7 @@ a { color: inherit; }
   left: 10px;
   bottom: calc(10px + var(--ox-safe-bottom));
   z-index: 8;
-  max-width: min(280px, calc(100% - 20px));
+  max-width: min(300px, calc(100% - 20px));
   padding: 10px 12px;
   border: 1px solid rgba(148, 170, 210, .28);
   border-radius: 12px;
@@ -308,6 +308,19 @@ a { color: inherit; }
   font-size: 10px;
   line-height: 1.45;
   pointer-events: none;
+}
+.ox-dev-debug .ox-dev-probe {
+  pointer-events: auto;
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(148, 170, 210, .35);
+  border-radius: 8px;
+  background: rgba(20, 36, 64, .95);
+  color: #d7e3ff;
+  font: inherit;
+  cursor: pointer;
 }
 .ox-toggle-row {
   display: flex;

@@ -182,6 +182,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [airEnabled, setAirEnabled] = useState(() => isAirNavigationEnabled());
   const [airDebug, setAirDebug] = useState<AirNavDebugSnapshot | null>(null);
   const [gestureDebug, setGestureDebug] = useState<string>("");
+  const [exitProbe, setExitProbe] = useState<"idle" | "requested" | "home">("idle");
+  const [pointerCount, setPointerCount] = useState(0);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceText, setVoiceText] = useState("");
   const [voiceMessage, setVoiceMessage] = useState("Say what you want to do.");
@@ -293,6 +295,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     if (exitingRef.current) return;
     if (screenRef.current !== "experience") return;
     exitingRef.current = true;
+    setExitProbe("requested");
     setExitingExperience(true);
     vibrateEscapeFeedback();
     window.setTimeout(() => {
@@ -304,6 +307,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       exitingRef.current = false;
       setScreen("home");
       setScreenStack([]);
+      setExitProbe("home");
     }, 220);
   }, []);
 
@@ -327,6 +331,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   useEffect(() => {
     if (!isAirNavigationDebug()) return;
     window.__oxGestureDebug = (phase, count) => {
+      setPointerCount(count);
       setGestureDebug(`${phase} · pointers=${count}`);
     };
     return () => {
@@ -739,15 +744,28 @@ export function ExperienceApp(props: ExperienceAppProps) {
               Swipe left or right with two fingers to return to OS Xperience.
             </div>
           ) : null}
-          {isAirNavigationDebug() && (gestureDebug || airDebug) ? (
+          {isAirNavigationDebug() ? (
             <div className="ox-dev-debug" aria-hidden="true">
-              <div>CAMERA: {(airDebug?.camera || "off").toUpperCase()}</div>
+              <div>EXPERIENCE: ACTIVE</div>
+              <div>EXIT PRIMITIVE: {typeof window.__oxExitExperienceToHome === "function" ? "READY" : "ERROR"}</div>
+              <div>EXIT: {exitProbe.toUpperCase()}</div>
+              <div>POINTERS: {pointerCount}</div>
+              <div>TOUCH: {gestureDebug || "none"}</div>
+              <div>AIR FEATURE: {airEnabled ? "ON" : "OFF"}</div>
+              <div>CAMERA: {(airDebug?.camera || (airEnabled ? "…" : "off")).toUpperCase()}</div>
               <div>HAND: {(airDebug?.hand || "none").toUpperCase()}</div>
               <div>GESTURE: {(airDebug?.gesture || "none").toUpperCase()}</div>
-              <div>MOTION: {(airDebug?.motion || "none").toUpperCase()}</div>
               <div>STATE: {(airDebug?.state || "idle").toUpperCase()}</div>
+              <div>MOTION: {(airDebug?.motion || "none").toUpperCase()}</div>
               {airDebug?.action ? <div>ACTION: {airDebug.action}</div> : null}
-              {gestureDebug ? <div>TOUCH: {gestureDebug}</div> : null}
+              {!airEnabled ? <div>HINT: enable Air Navigation in Profile</div> : null}
+              <button
+                type="button"
+                className="ox-dev-probe"
+                onClick={() => exitExperienceToHome()}
+              >
+                PROBE exitExperienceToHome
+              </button>
             </div>
           ) : null}
           <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
