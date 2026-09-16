@@ -1,21 +1,32 @@
 package com.digiconomy.osexperience;
 
+import android.graphics.Color;
+import android.os.Build;
+import android.os.Bundle;
 import android.os.SystemClock;
+import android.util.Log;
 import android.view.MotionEvent;
+import android.view.View;
 import android.webkit.WebView;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 import com.getcapacitor.BridgeActivity;
 
 /**
- * Host-owned ExperienceMode escape:
- * two fingers travelling together horizontally → OS Xperience Home.
- * Does not steal one-finger app swipes or pinch-to-zoom.
+ * OS Experience Android host:
+ * - Edge-to-edge + real WindowInsets → CSS --ox-safe-* (single inset source of truth)
+ * - Two-finger horizontal swipe → ox-experience-escape → exitExperienceToHome()
  */
 public class MainActivity extends BridgeActivity {
-  private static final float MIN_TRAVEL_DP = 72f;
-  private static final float MAX_VERTICAL_RATIO = 0.55f;
-  private static final float MAX_PINCH_CHANGE = 0.2f;
-  private static final float MIN_DIRECTION_AGREEMENT = 0.65f;
-  private static final long MAX_DURATION_MS = 750L;
+  private static final String TAG = "OxHost";
+  private static final float MIN_TRAVEL_DP = 56f;
+  private static final float MAX_VERTICAL_RATIO = 0.6f;
+  private static final float MAX_PINCH_CHANGE = 0.22f;
+  private static final float MIN_DIRECTION_AGREEMENT = 0.55f;
+  private static final long MAX_DURATION_MS = 900L;
 
   private final float[] startX = new float[2];
   private final float[] startY = new float[2];
@@ -24,6 +35,93 @@ public class MainActivity extends BridgeActivity {
   private boolean fired = false;
   private int pointerA = -1;
   private int pointerB = -1;
+  private boolean insetsWired = false;
+
+  @Override
+  protected void onCreate(Bundle savedInstanceState) {
+    super.onCreate(savedInstanceState);
+    WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+      getWindow().setStatusBarColor(Color.TRANSPARENT);
+      getWindow().setNavigationBarColor(Color.TRANSPARENT);
+    }
+    WindowInsetsControllerCompat controller =
+      WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+    if (controller != null) {
+      controller.setAppearanceLightStatusBars(false);
+      controller.setAppearanceLightNavigationBars(false);
+    }
+  }
+
+  @Override
+  public void onStart() {
+    super.onStart();
+    wireSystemInsets();
+  }
+
+  @Override
+  public void onResume() {
+    super.onResume();
+    wireSystemInsets();
+    pushInsetsToWeb();
+  }
+
+  private void wireSystemInsets() {
+    if (insetsWired) return;
+    final WebView webView = bridgeWebView();
+    if (webView == null) return;
+    insetsWired = true;
+    ViewCompat.setOnApplyWindowInsetsListener(webView, (v, insets) -> {
+      Insets bars = insets.getInsets(
+        WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
+      );
+      applyInsetsPx(bars.top, bars.bottom, bars.left, bars.right);
+      // Do not consume — WebView/keyboard still need inset dispatch.
+      return insets;
+    });
+    ViewCompat.requestApplyInsets(webView);
+  }
+
+  private void pushInsetsToWeb() {
+    final WebView webView = bridgeWebView();
+    if (webView == null) return;
+    ViewCompat.requestApplyInsets(webView);
+  }
+
+  private void applyInsetsPx(int top, int bottom, int left, int right) {
+    final WebView webView = bridgeWebView();
+    if (webView == null) return;
+    float d = getResources().getDisplayMetrics().density;
+    if (d <= 0f) d = 1f;
+    final float topCss = top / d;
+    final float bottomCss = bottom / d;
+    final float leftCss = left / d;
+    final float rightCss = right / d;
+    if (BuildConfig.DEBUG) {
+      Log.d(TAG, "insets css px top=" + topCss + " bottom=" + bottomCss);
+    }
+    final String js =
+      "(function(){"
+        + "var r=document.documentElement;"
+        + "r.style.setProperty('--ox-safe-top','" + topCss + "px');"
+        + "r.style.setProperty('--ox-safe-bottom','" + bottomCss + "px');"
+        + "r.style.setProperty('--ox-safe-left','" + leftCss + "px');"
+        + "r.style.setProperty('--ox-safe-right','" + rightCss + "px');"
+        + "r.dataset.oxInsets='native';"
+        + (BuildConfig.DEBUG ? "r.dataset.oxDebug='1';" : "")
+        + "window.dispatchEvent(new CustomEvent('ox-system-insets',{detail:{top:" + topCss
+        + ",bottom:" + bottomCss + ",left:" + leftCss + ",right:" + rightCss + "}}));"
+        + "})();";
+    webView.post(() -> webView.evaluateJavascript(js, null));
+  }
+
+  private WebView bridgeWebView() {
+    try {
+      return getBridge() != null ? getBridge().getWebView() : null;
+    } catch (Exception ignored) {
+      return null;
+    }
+  }
 
   @Override
   public boolean dispatchTouchEvent(MotionEvent event) {
@@ -31,8 +129,10 @@ public class MainActivity extends BridgeActivity {
     switch (action) {
       case MotionEvent.ACTION_DOWN:
         resetGesture();
+        debugTouch("DOWN", event);
         break;
       case MotionEvent.ACTION_POINTER_DOWN:
+        debugTouch("POINTER_DOWN", event);
         if (event.getPointerCount() == 2) {
           pointerA = event.getPointerId(0);
           pointerB = event.getPointerId(1);
@@ -46,9 +146,11 @@ public class MainActivity extends BridgeActivity {
             gestureStartMs = SystemClock.uptimeMillis();
             tracking = true;
             fired = false;
+            debugClass("TRACK_START");
           }
-        } else {
+        } else if (event.getPointerCount() > 2) {
           resetGesture();
+          debugClass("CANCEL_3PLUS");
         }
         break;
       case MotionEvent.ACTION_MOVE:
@@ -63,11 +165,13 @@ public class MainActivity extends BridgeActivity {
             );
             if (Verdict.ESCAPE == verdict) {
               fired = true;
+              debugClass("TWO_FINGER_HORIZONTAL_SWIPE");
               emitEscapeToBridge();
               resetGesture();
               return true;
             }
             if (Verdict.CANCEL == verdict) {
+              debugClass("CANCEL");
               resetGesture();
             }
           }
@@ -76,12 +180,38 @@ public class MainActivity extends BridgeActivity {
       case MotionEvent.ACTION_POINTER_UP:
       case MotionEvent.ACTION_UP:
       case MotionEvent.ACTION_CANCEL:
+        debugTouch(action == MotionEvent.ACTION_CANCEL ? "CANCEL" : "UP", event);
         resetGesture();
         break;
       default:
         break;
     }
     return super.dispatchTouchEvent(event);
+  }
+
+  private void debugTouch(String phase, MotionEvent event) {
+    if (!BuildConfig.DEBUG) return;
+    Log.d(TAG, phase + " count=" + event.getPointerCount());
+    emitDebugJs(phase, event.getPointerCount(), 0, 0);
+  }
+
+  private void debugClass(String label) {
+    if (!BuildConfig.DEBUG) return;
+    Log.d(TAG, "class=" + label);
+    emitDebugJs(label, 2, 0, 0);
+  }
+
+  private void emitDebugJs(String phase, int count, float dx, float dy) {
+    final WebView webView = bridgeWebView();
+    if (webView == null) return;
+    final String js =
+      "window.__oxGestureDebug&&window.__oxGestureDebug("
+        + JSONObjectQuote(phase) + "," + count + "," + dx + "," + dy + ");";
+    webView.post(() -> webView.evaluateJavascript(js, null));
+  }
+
+  private static String JSONObjectQuote(String value) {
+    return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\"";
   }
 
   private void resetGesture() {
@@ -156,10 +286,13 @@ public class MainActivity extends BridgeActivity {
   }
 
   private void emitEscapeToBridge() {
-    final WebView webView = getBridge() != null ? getBridge().getWebView() : null;
+    final WebView webView = bridgeWebView();
     if (webView == null) return;
     webView.post(() -> webView.evaluateJavascript(
-      "window.dispatchEvent(new CustomEvent('ox-experience-escape',{detail:{source:'android-host'}}));",
+      "(function(){"
+        + "if(window.__oxExperienceActive===false)return;"
+        + "window.dispatchEvent(new CustomEvent('ox-experience-escape',{detail:{source:'android-host'}}));"
+        + "})();",
       null
     ));
   }

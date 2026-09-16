@@ -12,6 +12,7 @@ a { color: inherit; }
 .ox-root {
   min-height: 100vh;
   min-height: 100dvh;
+  min-height: 100svh;
   color: var(--ox-text);
   background:
     radial-gradient(circle at 78% -8%, rgba(47, 123, 255, .13), transparent 34rem),
@@ -119,7 +120,11 @@ a { color: inherit; }
 .ox-side-user strong { font-size: 12px; }
 .ox-side-user small { color: var(--ox-text-secondary); font-size: 9px; }
 
-.ox-main { min-height: 100vh; padding-bottom: calc(var(--ox-nav-h) + var(--ox-safe-bottom) + 22px); }
+.ox-main {
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding-bottom: calc(var(--ox-nav-h) + var(--ox-safe-bottom) + 22px);
+}
 .ox-topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; justify-content: space-between; min-height: 65px; padding: calc(14px + var(--ox-safe-top)) 18px 14px; border-bottom: 1px solid var(--ox-border); background: rgba(5, 8, 16, .92); backdrop-filter: blur(18px); }
 .ox-topbar > div { display: flex; align-items: center; gap: 8px; }
 .ox-icon-button { display: inline-grid; width: 38px; height: 38px; place-items: center; padding: 0; color: var(--ox-text-secondary); border: 1px solid var(--ox-border); border-radius: 11px; background: rgba(17, 26, 44, .66); cursor: pointer; text-decoration: none; }
@@ -272,8 +277,9 @@ a { color: inherit; }
 
 .ox-in-app { position: fixed; inset: 0; z-index: 60; display: grid; grid-template-rows: auto 1fr; background: var(--ox-bg); padding-left: var(--ox-safe-left); padding-right: var(--ox-safe-right); }
 .ox-in-app.ox-immersive {
+  /* Usable app viewport only — Android/PWA system insets via --ox-safe-*. */
   grid-template-rows: 1fr;
-  padding: 0;
+  padding: var(--ox-safe-top) var(--ox-safe-right) var(--ox-safe-bottom) var(--ox-safe-left);
   background: #000;
   touch-action: manipulation;
   transition: transform .22s var(--ox-ease), opacity .22s var(--ox-ease);
@@ -282,6 +288,44 @@ a { color: inherit; }
   transform: scale(.965);
   opacity: 0;
   pointer-events: none;
+}
+.ox-in-app.ox-immersive.is-grabbed {
+  transform: scale(.985);
+  box-shadow: 0 0 0 999px rgba(5, 7, 15, .28);
+}
+.ox-dev-debug {
+  position: absolute;
+  left: 10px;
+  bottom: calc(10px + var(--ox-safe-bottom));
+  z-index: 8;
+  max-width: min(280px, calc(100% - 20px));
+  padding: 10px 12px;
+  border: 1px solid rgba(148, 170, 210, .28);
+  border-radius: 12px;
+  background: rgba(4, 8, 16, .88);
+  color: #b7c7e4;
+  font-family: var(--ox-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  pointer-events: none;
+}
+.ox-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  color: var(--ox-text);
+  font-size: 13px;
+}
+html.ox-native-shell {
+  /* Native WindowInsets push --ox-safe-* ; do not double-guess with hardcoded padding. */
+}
+html.ox-native-shell .ox-topbar {
+  background: rgba(5, 8, 16, .96);
+}
+html.ox-native-shell .ox-bottom-nav {
+  background: rgba(6, 10, 19, .98);
 }
 .ox-immersive-frame {
   width: 100%;

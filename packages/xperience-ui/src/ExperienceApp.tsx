@@ -20,7 +20,23 @@ import {
   shouldShowExperienceEscapeHint,
   vibrateEscapeFeedback,
 } from "./experience-escape.js";
+import {
+  isAirNavigationDebug,
+  isAirNavigationEnabled,
+  setAirNavigationEnabled,
+  startAirNavigation,
+  type AirNavDebugSnapshot,
+  type AirNavigationController,
+} from "./air-navigation.js";
 import "./styles.css";
+
+declare global {
+  interface Window {
+    __oxExperienceActive?: boolean;
+    __oxGestureDebug?: (phase: string, count: number, dx?: number, dy?: number) => void;
+    __oxExitExperienceToHome?: () => void;
+  }
+}
 
 export interface ExperienceAppProps {
   apiBase?: string;
@@ -162,6 +178,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [frameFailed, setFrameFailed] = useState(false);
   const [escapeHint, setEscapeHint] = useState(false);
   const [exitingExperience, setExitingExperience] = useState(false);
+  const [airGrabbed, setAirGrabbed] = useState(false);
+  const [airEnabled, setAirEnabled] = useState(() => isAirNavigationEnabled());
+  const [airDebug, setAirDebug] = useState<AirNavDebugSnapshot | null>(null);
+  const [gestureDebug, setGestureDebug] = useState<string>("");
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceText, setVoiceText] = useState("");
   const [voiceMessage, setVoiceMessage] = useState("Say what you want to do.");
@@ -169,6 +189,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [offline, setOffline] = useState(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const immersiveRef = useRef<HTMLDivElement | null>(null);
+  const airNavRef = useRef<AirNavigationController | null>(null);
   const screenRef = useRef(screen);
   const stackRef = useRef(screenStack);
   const exitingRef = useRef(false);
@@ -279,6 +300,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setFrameFailed(false);
       setEscapeHint(false);
       setExitingExperience(false);
+      setAirGrabbed(false);
       exitingRef.current = false;
       setScreen("home");
       setScreenStack([]);
@@ -286,10 +308,62 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }, []);
 
   useEffect(() => {
+    window.__oxExperienceActive = screen === "experience";
+    window.__oxExitExperienceToHome = exitExperienceToHome;
+    return () => {
+      window.__oxExperienceActive = false;
+      if (window.__oxExitExperienceToHome === exitExperienceToHome) {
+        delete window.__oxExitExperienceToHome;
+      }
+    };
+  }, [screen, exitExperienceToHome]);
+
+  useEffect(() => {
     const onEscape = () => exitExperienceToHome();
     window.addEventListener(EXPERIENCE_ESCAPE_EVENT, onEscape);
     return () => window.removeEventListener(EXPERIENCE_ESCAPE_EVENT, onEscape);
   }, [exitExperienceToHome]);
+
+  useEffect(() => {
+    if (!isAirNavigationDebug()) return;
+    window.__oxGestureDebug = (phase, count) => {
+      setGestureDebug(`${phase} · pointers=${count}`);
+    };
+    return () => {
+      delete window.__oxGestureDebug;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (screen !== "experience" || !opened) {
+      airNavRef.current?.stop();
+      airNavRef.current = null;
+      setAirDebug(null);
+      setAirGrabbed(false);
+      return;
+    }
+    if (!airEnabled) return;
+    let cancelled = false;
+    void startAirNavigation({
+      onExitHome: exitExperienceToHome,
+      onGrabbed: setAirGrabbed,
+      onDebug: (snap) => {
+        if (isAirNavigationDebug()) setAirDebug(snap);
+      },
+    }).then((controller) => {
+      if (cancelled) {
+        controller.stop();
+        return;
+      }
+      airNavRef.current = controller;
+    });
+    return () => {
+      cancelled = true;
+      airNavRef.current?.stop();
+      airNavRef.current = null;
+      setAirGrabbed(false);
+    };
+  }, [screen, opened, airEnabled, exitExperienceToHome]);
 
   useEffect(() => {
     if (screen !== "experience" || !opened) return;
@@ -626,6 +700,19 @@ export function ExperienceApp(props: ExperienceAppProps) {
           <small>GESTURES</small>
           <h2>Leave an Experience</h2>
           <p>While an application fills the screen, swipe left or right with two fingers to return to OS Xperience Home. One-finger swipes and pinch-to-zoom stay with the application. You can also use the system Back control.</p>
+          <p style={{ marginTop: 10 }}>With Air Navigation enabled: show an open palm, close to a fist, then throw left or right to return Home. Camera frames stay on this device.</p>
+          <label className="ox-toggle-row">
+            <span>Air Navigation</span>
+            <input
+              type="checkbox"
+              checked={airEnabled}
+              onChange={(event) => {
+                const next = event.target.checked;
+                setAirNavigationEnabled(next);
+                setAirEnabled(next);
+              }}
+            />
+          </label>
         </section>
       </div> : null}
 
@@ -645,11 +732,22 @@ export function ExperienceApp(props: ExperienceAppProps) {
         <div
           ref={immersiveRef}
           data-testid="in-app-experience"
-          className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}`}
+          className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}${airGrabbed ? " is-grabbed" : ""}`}
         >
           {escapeHint ? (
             <div className="ox-escape-hint" role="status">
               Swipe left or right with two fingers to return to OS Xperience.
+            </div>
+          ) : null}
+          {isAirNavigationDebug() && (gestureDebug || airDebug) ? (
+            <div className="ox-dev-debug" aria-hidden="true">
+              <div>CAMERA: {(airDebug?.camera || "off").toUpperCase()}</div>
+              <div>HAND: {(airDebug?.hand || "none").toUpperCase()}</div>
+              <div>GESTURE: {(airDebug?.gesture || "none").toUpperCase()}</div>
+              <div>MOTION: {(airDebug?.motion || "none").toUpperCase()}</div>
+              <div>STATE: {(airDebug?.state || "idle").toUpperCase()}</div>
+              {airDebug?.action ? <div>ACTION: {airDebug.action}</div> : null}
+              {gestureDebug ? <div>TOUCH: {gestureDebug}</div> : null}
             </div>
           ) : null}
           <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
@@ -688,7 +786,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       ) : null}
     </main>
 
-    {!isDesktop ? <BottomNav screen={screen} go={navigate} /> : null}
+    {!isDesktop && screen !== "experience" ? <BottomNav screen={screen} go={navigate} /> : null}
     {stopTarget ? <div className="ox-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setStopTarget(null); }}>
       <section data-testid="stop-modal" className="ox-modal" role="dialog" aria-modal="true" aria-labelledby="stop-title"><span className="ox-modal-icon">◇</span><h2 id="stop-title">Stop experiencing {stopTarget.application.name}?</h2><p>This removes it from My Experience. You can add it again from Directory at any time.</p><div><button className="ox-button secondary" onClick={() => setStopTarget(null)}>Cancel</button><button data-testid="confirm-stop" className="ox-button danger" disabled={busyId === stopTarget.applicationId} onClick={() => void confirmStop()}>Stop Experiencing</button></div></section>
     </div> : null}

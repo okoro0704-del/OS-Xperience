@@ -9,3 +9,13 @@ export {
   emitExperienceEscape,
 } from "./experience-escape.js";
 export type { EscapeGestureThresholds, Point } from "./experience-escape.js";
+export {
+  AIR_NAV_DEBUG_KEY,
+  AIR_NAV_ENABLED_KEY,
+  classifyHandPose,
+  isAirNavigationDebug,
+  isAirNavigationEnabled,
+  setAirNavigationEnabled,
+  startAirNavigation,
+} from "./air-navigation.js";
+export type { AirNavDebugSnapshot, AirNavState } from "./air-navigation.js";
