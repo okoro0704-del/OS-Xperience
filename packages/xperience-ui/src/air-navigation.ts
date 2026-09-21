@@ -84,6 +84,7 @@ export function setAirNavigationEnabled(enabled: boolean): void {
   }
 }
 
+/** Explicit opt-in only — never auto-enable in DEV (that covered experienced apps with a debug board). */
 export function isAirNavigationDebug(): boolean {
   try {
     if (localStorage.getItem(AIR_NAV_DEBUG_KEY) === "1") return true;
@@ -91,7 +92,7 @@ export function isAirNavigationDebug(): boolean {
   } catch {
     /* ignore */
   }
-  return Boolean((import.meta as ImportMeta & { env?: { DEV?: boolean } }).env?.DEV);
+  return false;
 }
 
 export interface AirNavigationController {

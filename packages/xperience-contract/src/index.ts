@@ -42,6 +42,76 @@ export type EvidenceStatus = (typeof EVIDENCE_STATUSES)[number];
 export const APPLICATION_SURFACE_TYPES = ["PUBLIC", "MANAGEMENT"] as const;
 export type ApplicationSurfaceType = (typeof APPLICATION_SURFACE_TYPES)[number];
 
+/**
+ * Who authenticates the human for an Experience.
+ * Xperience launch ≠ authentication.
+ */
+export const EXPERIENCE_AUTH_MODES = ["PUBLIC", "APP_MANAGED", "TRUSTID"] as const;
+export type ExperienceAuthMode = (typeof EXPERIENCE_AUTH_MODES)[number];
+
+/** How much of an Experience can run without network. */
+export const OFFLINE_CAPABILITIES = ["NONE", "SHELL_ONLY", "PARTIAL", "FULL"] as const;
+export type OfflineCapability = (typeof OFFLINE_CAPABILITIES)[number];
+
+export function normalizeExperienceAuthMode(value: unknown): ExperienceAuthMode {
+  if (value === "PUBLIC" || value === "APP_MANAGED" || value === "TRUSTID") return value;
+  return "PUBLIC";
+}
+
+export function normalizeOfflineCapability(value: unknown): OfflineCapability {
+  if (value === "NONE" || value === "SHELL_ONLY" || value === "PARTIAL" || value === "FULL") return value;
+  return "NONE";
+}
+
+/**
+ * Local Xperience installation — device/install continuity, not human verification.
+ * Must never be treated as TrustID / PDI identity.
+ */
+export interface XperienceInstallation {
+  installationId: string;
+  createdAt: string;
+  lastOpenedAt: string;
+  lastExperienceId?: string;
+  runtimeVersion: string;
+}
+
+/** Local Experience registry row for offline restore and auth contract. */
+export interface ExperienceRegistryEntry {
+  experienceId: string;
+  name: string;
+  version: string;
+  entrypoint: string;
+  origin: string;
+  authMode: ExperienceAuthMode;
+  offlineCapability: OfflineCapability;
+  status: "READY" | "UNAVAILABLE" | "ONLINE_ONLY";
+  lastUpdatedAt: string;
+  managementUrl?: string;
+  category?: string;
+  description?: string;
+}
+
+/**
+ * Runtime slot for switching Experiences without owning app auth sessions.
+ * Never stores passwords, passkeys, OTPs, cookies, or private tokens.
+ */
+export interface ExperienceSlot {
+  experienceId: string;
+  route?: string;
+  lastActiveAt: string;
+  surface: ApplicationSurfaceType;
+  /** Opaque app-owned restore hint — never Xperience auth material. */
+  restoreState?: string;
+}
+
+export interface LastExperienceState {
+  lastExperienceId: string;
+  lastRoute?: string;
+  lastOpenedAt: string;
+  surface: ApplicationSurfaceType;
+  experienceStateReference?: string;
+}
+
 export interface ApplicationManifestClaim {
   schemaVersion: "1";
   applicationId: string;
@@ -61,6 +131,9 @@ export interface ApplicationManifestClaim {
    * Entry visibility only — the target app still authorizes real capabilities.
    */
   managementOperatorIds?: string[];
+  /** Who owns authentication for the public Experience surface. */
+  authMode?: ExperienceAuthMode;
+  offlineCapability?: OfflineCapability;
   capabilities: Capability[];
   repository?: { provider: "GITHUB"; url: string };
   deploymentClaims?: { provider: string; url: string }[];
@@ -164,6 +237,8 @@ export function validateManifest(input: unknown): ValidationResult<ApplicationMa
   if (Array.isArray(m.deploymentClaims)) {
     value.deploymentClaims = m.deploymentClaims as ApplicationManifestClaim["deploymentClaims"];
   }
+  value.authMode = normalizeExperienceAuthMode(m.authMode);
+  value.offlineCapability = normalizeOfflineCapability(m.offlineCapability);
   return { ok: true, value };
 }
 
@@ -270,6 +345,13 @@ export interface DirectoryApplicationView {
    * Presence of managementUrl alone is not sufficient.
    */
   canManage: boolean;
+  /**
+   * Who owns authentication for this Experience.
+   * Default PUBLIC — Xperience never treats shell entry as authentication.
+   */
+  authMode?: ExperienceAuthMode;
+  /** How far this Experience can operate without network. */
+  offlineCapability?: OfflineCapability;
   category: Exclude<DirectoryCategory, "All">;
   capabilities: Capability[];
   publicationState: "PUBLISHED" | "NOT_PUBLISHED";
@@ -298,6 +380,9 @@ export interface LifeOSCatalogApplicationClaim {
   managementUrl?: string;
   /** Participant IDs with management-entry relationship (Portal-declared). */
   managementOperatorIds?: string[];
+  /** Authentication owner for the public Experience surface. */
+  authMode?: ExperienceAuthMode;
+  offlineCapability?: OfflineCapability;
   capabilities: Capability[];
   /** PUBLIC eligible for Directory; PRIVATE never listed. */
   visibility: "PUBLIC" | "PRIVATE";
@@ -388,6 +473,8 @@ export function parseLifeOSCatalogPayload(input: unknown): LifeOSCatalogApplicat
     if (managementUrl) claim.managementUrl = managementUrl;
     const managementOperatorIds = normalizeManagementOperatorIds(row.managementOperatorIds);
     if (managementOperatorIds) claim.managementOperatorIds = managementOperatorIds;
+    claim.authMode = normalizeExperienceAuthMode(row.authMode);
+    claim.offlineCapability = normalizeOfflineCapability(row.offlineCapability);
     out.push(claim);
   }
   return out;

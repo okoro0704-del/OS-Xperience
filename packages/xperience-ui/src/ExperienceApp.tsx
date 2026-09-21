@@ -12,6 +12,14 @@ import {
   XperienceApiError,
   type XperienceApiClient,
 } from "@digiconomy/xperience-sdk";
+import {
+  applyOnlineDirectory,
+  bootFromLocal,
+  buildLocalOpenPayload,
+  canOperateOffline,
+  rememberOpenedExperience,
+  shellAuthPosture,
+} from "./local/index.js";
 import { getSpeechRecognition, type SpeechRecognition, type VoiceState } from "./speech.js";
 import {
   EXPERIENCE_ESCAPE_EVENT,
@@ -241,6 +249,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [voiceMessage, setVoiceMessage] = useState("Say what you want to do.");
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 960px)").matches);
   const [offline, setOffline] = useState(false);
+  const [experienceOfflineMessage, setExperienceOfflineMessage] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const immersiveRef = useRef<HTMLDivElement | null>(null);
   const airNavRef = useRef<AirNavigationController | null>(null);
@@ -261,28 +270,82 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
   const load = useCallback(async () => {
     setLoading(true);
+    const isOnline =
+      typeof props.online === "boolean"
+        ? props.online
+        : typeof navigator === "undefined"
+          ? true
+          : navigator.onLine;
+
     try {
-      const [directoryResult, featuredResult, membershipResult, me] = await Promise.all([
-        api.listDirectory(),
-        api.featuredDirectory(),
-        api.listMyExperience(),
-        api.me(),
-      ]);
-      setDirectory(directoryResult.applications);
-      setFeatured(featuredResult.applications);
-      setMemberships(membershipResult.experiences);
-      setParticipant(me);
+      // Local-first: installation identity + registry + restore — no Xperience login.
+      const local = bootFromLocal({ online: isOnline });
+      setDirectory(local.directory);
+      setFeatured(local.featured);
+      setMemberships(local.memberships);
+      setParticipant({
+        id: local.installation.installationId,
+        role: "INSTALLATION",
+        displayName: "This installation",
+      });
       setError(null);
-      preconnectOrigins([
-        ...directoryResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
-        ...featuredResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
-      ]);
+
+      if (local.restore) {
+        setExperienceOfflineMessage(local.restore.offlineBlocked ? (local.restore.offlineMessage ?? null) : null);
+        setLaunchingApp(local.restore.app);
+        if (local.restore.payload && !local.restore.offlineBlocked) {
+          setOpened(local.restore.payload);
+          setFrameReady(false);
+          setFrameFailed(false);
+          navigate("experience", { replace: true });
+        } else if (local.restore.offlineBlocked) {
+          setOpened(null);
+          navigate("experience", { replace: true });
+        }
+      }
+
+      if (!isOnline) {
+        return;
+      }
+
+      try {
+        const [directoryResult, featuredResult, membershipResult] = await Promise.all([
+          api.listDirectory(),
+          api.featuredDirectory(),
+          api.listMyExperience(),
+        ]);
+        applyOnlineDirectory(directoryResult.applications, membershipResult.experiences);
+        setDirectory(directoryResult.applications);
+        setFeatured(featuredResult.applications);
+        setMemberships(membershipResult.experiences);
+        preconnectOrigins([
+          ...directoryResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
+          ...featuredResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
+        ]);
+        // Optional profile enrichment — never gates shell entry.
+        try {
+          const me = await api.me();
+          setParticipant((current) => ({
+            id: current?.id ?? local.installation.installationId,
+            role: me.role || "PARTICIPANT",
+            email: me.email,
+            displayName: me.displayName || current?.displayName,
+          }));
+        } catch {
+          /* ignore — installation identity remains */
+        }
+      } catch (reason) {
+        // Soft failure: local shell already usable offline.
+        if (!local.directory.length) {
+          setError(reason instanceof XperienceApiError ? reason.message : "Directory sync unavailable.");
+        }
+      }
     } catch (reason) {
-      setError(reason instanceof XperienceApiError ? reason.message : "The service could not be reached.");
+      setError(reason instanceof Error ? reason.message : "OS Xperience could not start.");
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, navigate, props.online]);
 
   useEffect(() => {
     void load();
@@ -522,6 +585,37 @@ export function ExperienceApp(props: ExperienceAppProps) {
     return result.applications.find((app) => app.name.toLowerCase() === normalized) ?? result.applications[0] ?? null;
   }, [api]);
 
+  const openLocalExperience = useCallback(
+    (app: DirectoryApplicationView, surface: ApplicationSurfaceType = "PUBLIC") => {
+      const posture = shellAuthPosture(app.authMode);
+      void posture; // shell never claims authenticated for any mode
+      const online = !offline;
+      const gate = canOperateOffline(app.offlineCapability, online);
+      if (!gate.ok) {
+        setExperienceOfflineMessage(
+          gate.reason ??
+            "This Experience needs a connection to continue. Your previous state has been preserved.",
+        );
+        setOpened(null);
+        setLaunchingApp(app);
+        setFrameFailed(false);
+        setFrameReady(false);
+        navigate("experience");
+        rememberOpenedExperience(app, surface);
+        return;
+      }
+      setExperienceOfflineMessage(null);
+      const payload = buildLocalOpenPayload(app, surface);
+      setOpened(payload);
+      setLaunchingApp(null);
+      setFrameFailed(false);
+      setFrameReady(false);
+      navigate("experience");
+      rememberOpenedExperience(app, surface);
+    },
+    [navigate, offline],
+  );
+
   const startApplication = useCallback(async (app: DirectoryApplicationView) => {
     const trace = beginLaunchTrace(app);
     launchTraceRef.current = trace;
@@ -532,21 +626,36 @@ export function ExperienceApp(props: ExperienceAppProps) {
     setFrameReady(false);
     setLaunchingApp(app);
     setOpened(null);
+    setExperienceOfflineMessage(null);
     setExitingExperience(false);
     exitingRef.current = false;
     markLaunch(trace, "mode_entered");
     navigate("experience");
     try {
       markLaunch(trace, "request");
+      if (offline) {
+        openLocalExperience({ ...app, experienced: true }, "PUBLIC");
+        summarizeLaunch(trace);
+        return;
+      }
       if (!app.experienced) {
-        await api.startExperience(app.id);
+        try {
+          await api.startExperience(app.id);
+        } catch {
+          /* local open still allowed for PUBLIC / offline-capable */
+        }
       }
       markLaunch(trace, "destination");
-      const payload = await api.openExperience(app.id, { surface: "PUBLIC" });
-      markLaunch(trace, "response");
-      setOpened(payload);
-      setLaunchingApp(null);
-      void refreshMemberships();
+      try {
+        const payload = await api.openExperience(app.id, { surface: "PUBLIC" });
+        markLaunch(trace, "response");
+        setOpened(payload);
+        setLaunchingApp(null);
+        rememberOpenedExperience(app, "PUBLIC");
+        void refreshMemberships();
+      } catch {
+        openLocalExperience({ ...app, experienced: true }, "PUBLIC");
+      }
       summarizeLaunch(trace);
     } catch (reason) {
       setLaunchingApp(null);
@@ -557,7 +666,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setBusyId(null);
     }
-  }, [api, refreshMemberships, navigate]);
+  }, [api, refreshMemberships, navigate, offline, openLocalExperience]);
 
   const openApplication = useCallback(async (app: DirectoryApplicationView, surface: ApplicationSurfaceType = "PUBLIC") => {
     if (!app.experienced) {
@@ -578,18 +687,29 @@ export function ExperienceApp(props: ExperienceAppProps) {
     setFrameReady(false);
     setLaunchingApp(app);
     setOpened(null);
+    setExperienceOfflineMessage(null);
     setExitingExperience(false);
     exitingRef.current = false;
     markLaunch(trace, "mode_entered");
     navigate("experience");
     try {
       markLaunch(trace, "request");
-      const payload = await api.openExperience(app.id, { surface });
-      markLaunch(trace, "response");
-      markLaunch(trace, "destination");
-      setOpened(payload);
-      setLaunchingApp(null);
-      void refreshMemberships();
+      if (offline) {
+        openLocalExperience(app, surface);
+        summarizeLaunch(trace);
+        return;
+      }
+      try {
+        const payload = await api.openExperience(app.id, { surface });
+        markLaunch(trace, "response");
+        markLaunch(trace, "destination");
+        setOpened(payload);
+        setLaunchingApp(null);
+        rememberOpenedExperience(app, surface);
+        void refreshMemberships();
+      } catch {
+        openLocalExperience(app, surface);
+      }
       summarizeLaunch(trace);
     } catch (reason) {
       setLaunchingApp(null);
@@ -599,7 +719,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setBusyId(null);
     }
-  }, [api, refreshMemberships, navigate]);
+  }, [api, refreshMemberships, navigate, offline, openLocalExperience]);
 
   const routeObjective = useCallback(async (text: string) => {
     const utterance = parseExperienceUtterance(text);
@@ -819,7 +939,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
     <main className="ox-main" ref={(node) => { mainScrollRef.current = node; }}>
       <div className="ox-topbar"><Brand /><div><button className="ox-icon-button" aria-label="Notifications"><Icon name="bell" /></button><button className="ox-avatar" aria-label="Open profile" onClick={() => navigate("profile")}>{initials(userName)}</button></div></div>
-      {offline ? <div className="ox-offline-banner" role="status">You&apos;re offline. Directory needs a connection — reconnect and try again.</div> : null}
+      {offline ? <div className="ox-offline-banner" role="status" data-testid="offline-banner">You&apos;re offline. OS Xperience is running from this installation — online sync will resume when you reconnect.</div> : null}
       {error && screen !== "experience" ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
       {screen === "home" ? <div data-testid="home" className="ox-screen ox-home">
@@ -946,8 +1066,18 @@ export function ExperienceApp(props: ExperienceAppProps) {
       </div> : null}
 
       {screen === "profile" ? <div className="ox-screen">
-        <PageHeader eyebrow="PARTICIPANT" title="Profile" copy="Your participant information for this OS Xperience." />
-        <section className="ox-profile-card"><span className="ox-profile-avatar">{initials(participant?.displayName || userName)}</span><div><h2>{participant?.displayName || userName}</h2><p>{participant?.email || "No email provided"}</p></div><dl><div><dt>Participant ID</dt><dd>{participant?.id || userId}</dd></div><div><dt>Role</dt><dd>{participant?.role || "USER"}</dd></div></dl></section>
+        <PageHeader eyebrow="INSTALLATION" title="This Xperience" copy="Local installation identity — not a login. Hosted apps keep their own authentication." />
+        <section className="ox-profile-card" data-testid="installation-profile">
+          <span className="ox-profile-avatar">{initials(participant?.displayName || "OX")}</span>
+          <div>
+            <h2>{participant?.displayName || "This installation"}</h2>
+            <p>No Xperience account required</p>
+          </div>
+          <dl>
+            <div><dt>Installation ID</dt><dd>{participant?.id || "initializing…"}</dd></div>
+            <div><dt>Kind</dt><dd>{participant?.role || "INSTALLATION"}</dd></div>
+          </dl>
+        </section>
         <section className="ox-help-card">
           <small>GESTURES</small>
           <h2>Leave Xperience</h2>
@@ -1034,24 +1164,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 <span className="ox-labs-chrome-id">{NAV_LABS_BUILD_ID}</span>
               </div>
             ) : null}
-            {(labsEnabled && labsDiagnostics) || isAirNavigationDebug() ? (
-              <div className="ox-dev-debug" aria-hidden="true">
-                <div>XPERIENCE NAV LAB</div>
-                <div>BUILD: {NAV_LABS_BUILD_ID}</div>
-                <div>EXPERIMENT: {(labsExperiment || "none").toUpperCase()}</div>
-                <div>STATE: {(labsHud?.state || "idle").toUpperCase()}</div>
-                <div>PROGRESS: {typeof labsHud?.progress === "number" ? labsHud.progress.toFixed(2) : "—"}</div>
-                {labsHud?.detail ? <div>DETAIL: {labsHud.detail}</div> : null}
-                <div>EXIT PRIMITIVE: {typeof window.__oxExitExperienceToHome === "function" ? "READY" : "ERROR"}</div>
-                <div>EXIT: {exitProbe.toUpperCase()}</div>
-                <div>POINTERS: {pointerCount}</div>
-                <div>TOUCH: {gestureDebug || "none"}</div>
-              </div>
-            ) : null}
             <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
               Return to OS Xperience Home
             </button>
-            {(launchingApp || (opened && !frameReady && !frameFailed)) ? (
+            {(launchingApp || (opened && !frameReady && !frameFailed)) && !experienceOfflineMessage ? (
               <section className="ox-launch-shell" aria-live="polite" aria-busy={!opened || !frameReady}>
                 <span className="ox-app-glyph" aria-hidden="true">
                   {initials(launchingApp?.name || opened?.name || "OX")}
@@ -1060,7 +1176,26 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 <p>Opening…</p>
               </section>
             ) : null}
-            {frameFailed && opened ? (
+            {experienceOfflineMessage ? (
+              <section className="ox-frame-fallback ox-immersive-fallback" data-testid="experience-offline">
+                <h1>{launchingApp?.name || opened?.name || "Experience"}</h1>
+                <p>{experienceOfflineMessage}</p>
+                <button
+                  className="ox-button primary"
+                  type="button"
+                  onClick={() => {
+                    setExperienceOfflineMessage(null);
+                    void load();
+                  }}
+                >
+                  Retry
+                </button>
+                <button className="ox-button secondary" type="button" onClick={exitExperienceToHome}>
+                  Stay in Xperience
+                </button>
+              </section>
+            ) : null}
+            {frameFailed && opened && !experienceOfflineMessage ? (
               <section className="ox-frame-fallback ox-immersive-fallback">
                 <h1>{opened.name} couldn&apos;t open</h1>
                 <p>It may only allow a full browser window.</p>
@@ -1071,7 +1206,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
                   Back to Home
                 </button>
               </section>
-            ) : opened ? (
+            ) : opened && !experienceOfflineMessage ? (
               <iframe
                 className={`ox-immersive-frame${frameReady ? " is-ready" : " is-loading"}`}
                 title={opened.name}

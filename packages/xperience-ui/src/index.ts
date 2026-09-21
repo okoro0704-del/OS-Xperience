@@ -73,3 +73,25 @@ export type {
   AirSwipeState,
   NavLabsControllerOptions,
 } from "./nav-labs/index.js";
+
+export {
+  MYBRANDOS_PUBLIC_ENTRY,
+  MYBRANDOS_PUBLIC_ID,
+  applyOnlineDirectory,
+  assertSafeRestoreState,
+  bootFromLocal,
+  buildLocalOpenPayload,
+  canClaimAuthenticatedWithoutTrustId,
+  canOperateOffline,
+  clearMemoryKvStore,
+  ensureInstallation,
+  memoryKvStore,
+  readInstallation,
+  readLastExperience,
+  rememberOpenedExperience,
+  sessionsAreIsolated,
+  setKvStoreForTests,
+  shellAuthPosture,
+  touchExperienceSlot,
+} from "./local/index.js";
+export type { XperienceBootResult, ShellAuthPosture, KvStore } from "./local/index.js";
