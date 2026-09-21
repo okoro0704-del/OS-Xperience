@@ -18,6 +18,7 @@ import {
   syncRegistryFromDirectory,
 } from "./registry.js";
 import { getExperienceSlot, readLastExperience, touchExperienceSlot } from "./session.js";
+import { enterXperienceMode, readRuntimeMode } from "./mode.js";
 
 export interface XperienceBootResult {
   installation: XperienceInstallation;
@@ -38,6 +39,8 @@ export interface XperienceBootResult {
   usedNetwork: boolean;
   /** Always false — Xperience has no login gate. */
   requiresXperienceLogin: false;
+  /** Last shell mode — XPERIENCE restores immediately without Home. */
+  lastMode: "HOME" | "XPERIENCE";
 }
 
 function membershipFromEntry(entry: ExperienceRegistryEntry): ExperienceMembershipView {
@@ -55,6 +58,7 @@ function membershipFromEntry(entry: ExperienceRegistryEntry): ExperienceMembersh
 export function bootFromLocal(options?: { online?: boolean }): XperienceBootResult {
   const online = options?.online ?? (typeof navigator !== "undefined" ? navigator.onLine : false);
   const installation = ensureInstallation();
+  const lastMode = readRuntimeMode();
   let registry = ensureBootstrapRegistry();
   if (registry.length === 0) {
     registry = [MYBRANDOS_PUBLIC_ENTRY];
@@ -68,6 +72,11 @@ export function bootFromLocal(options?: { online?: boolean }): XperienceBootResu
   const lastExperience = readLastExperience();
   let restore: XperienceBootResult["restore"] = null;
 
+  // X2: restore only when last mode was XPERIENCE, or first open (X1 bootstrap).
+  // Leaving to Home sets mode HOME — do not force Experience again.
+  const firstOpen = !lastExperience;
+  const shouldRestore = lastMode === "XPERIENCE" || firstOpen;
+
   const targetId =
     lastExperience?.lastExperienceId ??
     installation.lastExperienceId ??
@@ -75,7 +84,7 @@ export function bootFromLocal(options?: { online?: boolean }): XperienceBootResu
       ? MYBRANDOS_PUBLIC_ID
       : registry.find(isMybrandPublic)?.experienceId);
 
-  if (targetId) {
+  if (shouldRestore && targetId) {
     const entry = findRegistryEntry(targetId) ?? registry.find((e) => e.experienceId === targetId);
     if (entry) {
       const app = entryToOpenApp(entry);
@@ -89,6 +98,7 @@ export function bootFromLocal(options?: { online?: boolean }): XperienceBootResu
           offlineMessage: offlineCheck.reason,
           shellAuth,
         };
+        enterXperienceMode();
       } else {
         const surface = lastExperience?.surface === "MANAGEMENT" ? "MANAGEMENT" : "PUBLIC";
         let payload: OpenExperiencePayload | null = null;
@@ -104,6 +114,7 @@ export function bootFromLocal(options?: { online?: boolean }): XperienceBootResu
           payload = buildLocalOpenPayload(app, "PUBLIC");
         }
         restore = { app, payload, offlineBlocked: false, shellAuth };
+        enterXperienceMode();
       }
     }
   }
@@ -118,6 +129,7 @@ export function bootFromLocal(options?: { online?: boolean }): XperienceBootResu
     restore,
     usedNetwork: false,
     requiresXperienceLogin: false,
+    lastMode: restore ? "XPERIENCE" : lastMode,
   };
 }
 
@@ -140,6 +152,7 @@ export function rememberOpenedExperience(
     route,
   });
   updateInstallationLastExperience(app.id);
+  enterXperienceMode();
 }
 
 export { MYBRANDOS_PUBLIC_ENTRY, MYBRANDOS_PUBLIC_ID };

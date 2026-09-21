@@ -60,6 +60,11 @@ export function readSlots(): Record<string, ExperienceSlot> {
       surface: row.surface === "MANAGEMENT" ? "MANAGEMENT" : "PUBLIC",
       restoreState:
         typeof row.restoreState === "string" ? assertSafeRestoreState(row.restoreState) : undefined,
+      runtimeTier:
+        row.runtimeTier === "ACTIVE" || row.runtimeTier === "WARM" || row.runtimeTier === "SUSPENDED"
+          ? row.runtimeTier
+          : undefined,
+      offlineState: row.offlineState === "blocked" ? "blocked" : row.offlineState === "ok" ? "ok" : undefined,
     };
   }
   return out;

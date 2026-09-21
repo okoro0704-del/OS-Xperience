@@ -102,7 +102,28 @@ export interface ExperienceSlot {
   surface: ApplicationSurfaceType;
   /** Opaque app-owned restore hint — never Xperience auth material. */
   restoreState?: string;
+  /** Runtime tier assigned by the Xperience switcher. */
+  runtimeTier?: RuntimeTier;
+  offlineState?: "ok" | "blocked";
 }
+
+/** Shell mode — XPERIENCE is consumption; HOME covers Directory / My Experience / Profile. */
+export const RUNTIME_MODES = ["HOME", "XPERIENCE"] as const;
+export type RuntimeMode = (typeof RUNTIME_MODES)[number];
+
+/** Memory/battery tiers for hosted Experiences. */
+export const RUNTIME_TIERS = ["ACTIVE", "WARM", "SUSPENDED"] as const;
+export type RuntimeTier = (typeof RUNTIME_TIERS)[number];
+
+/** Switcher-facing availability — never expose raw backend errors. */
+export const EXPERIENCE_AVAILABILITIES = [
+  "AVAILABLE",
+  "OFFLINE_AVAILABLE",
+  "CONNECTION_REQUIRED",
+  "LOCKED",
+  "DISABLED",
+] as const;
+export type ExperienceAvailability = (typeof EXPERIENCE_AVAILABILITIES)[number];
 
 export interface LastExperienceState {
   lastExperienceId: string;

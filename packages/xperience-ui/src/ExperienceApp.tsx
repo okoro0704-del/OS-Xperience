@@ -15,11 +15,19 @@ import {
 import {
   applyOnlineDirectory,
   bootFromLocal,
+  buildLineup,
   buildLocalOpenPayload,
   canOperateOffline,
+  enterXperienceMode,
+  leaveXperienceMode,
+  nextExperienceId,
+  planSwitch,
+  previousExperienceId,
   rememberOpenedExperience,
   shellAuthPosture,
+  type LineupEntry,
 } from "./local/index.js";
+import { ExperienceSwitcher, attachDoubleTap } from "./switcher/index.js";
 import { getSpeechRecognition, type SpeechRecognition, type VoiceState } from "./speech.js";
 import {
   EXPERIENCE_ESCAPE_EVENT,
@@ -250,14 +258,27 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 960px)").matches);
   const [offline, setOffline] = useState(false);
   const [experienceOfflineMessage, setExperienceOfflineMessage] = useState<string | null>(null);
+  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const [lineup, setLineup] = useState<LineupEntry[]>([]);
+  const [activeExperienceId, setActiveExperienceId] = useState<string | null>(null);
+  const [mountedFrames, setMountedFrames] = useState<
+    { id: string; embedUrl: string; name: string }[]
+  >([]);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const immersiveRef = useRef<HTMLDivElement | null>(null);
+  const switcherEdgeLeftRef = useRef<HTMLDivElement | null>(null);
+  const switcherEdgeRightRef = useRef<HTMLDivElement | null>(null);
+  const switcherIdleRef = useRef<number | null>(null);
+  const mountedIdsRef = useRef<string[]>([]);
+  const activeIdRef = useRef<string | null>(null);
   const airNavRef = useRef<AirNavigationController | null>(null);
   const screenRef = useRef(screen);
   const stackRef = useRef(screenStack);
   const exitingRef = useRef(false);
   screenRef.current = screen;
   stackRef.current = screenStack;
+  mountedIdsRef.current = mountedFrames.map((frame) => frame.id);
+  activeIdRef.current = activeExperienceId;
 
   const navigate = useCallback((next: Screen, options?: { replace?: boolean }) => {
     setScreen((current) => {
@@ -267,6 +288,168 @@ export function ExperienceApp(props: ExperienceAppProps) {
       return next;
     });
   }, []);
+
+  const refreshLineup = useCallback(
+    (apps?: DirectoryApplicationView[]) => {
+      const next = buildLineup({
+        online: !offline,
+        membershipIds: memberships.map((item) => item.applicationId),
+        apps: apps ?? [
+          ...memberships.map((item) => item.application),
+          ...directory,
+        ],
+      });
+      setLineup(next);
+      return next;
+    },
+    [directory, memberships, offline],
+  );
+
+  const dismissSwitcher = useCallback(() => {
+    setSwitcherOpen(false);
+    if (switcherIdleRef.current != null) {
+      window.clearTimeout(switcherIdleRef.current);
+      switcherIdleRef.current = null;
+    }
+  }, []);
+
+  const bumpSwitcherIdle = useCallback(() => {
+    if (switcherIdleRef.current != null) window.clearTimeout(switcherIdleRef.current);
+    switcherIdleRef.current = window.setTimeout(() => setSwitcherOpen(false), 4200);
+  }, []);
+
+  const openSwitcher = useCallback(() => {
+    setSwitcherOpen(true);
+    bumpSwitcherIdle();
+  }, [bumpSwitcherIdle]);
+
+  const applyMountPlan = useCallback(
+    (
+      nextLineup: LineupEntry[],
+      toId: string,
+      fromId: string | null,
+      options?: { offlineMessage?: string | null; app?: DirectoryApplicationView },
+    ) => {
+      const plan = planSwitch({
+        lineup: nextLineup,
+        fromId,
+        toId,
+        previouslyMounted: mountedIdsRef.current,
+      });
+      if (!plan) return;
+
+      enterXperienceMode();
+      setActiveExperienceId(plan.activeId);
+      setSwitcherOpen(false);
+
+      if (plan.offlineBlocked || options?.offlineMessage) {
+        setExperienceOfflineMessage(
+          options?.offlineMessage ??
+            "This Experience needs a connection to continue. Your previous state has been preserved.",
+        );
+        const entry = nextLineup.find((item) => item.experienceId === toId);
+        if (entry) {
+          setLaunchingApp(
+            options?.app ?? {
+              id: entry.experienceId,
+              name: entry.name,
+              version: "1.0.0",
+              origin: entry.origin,
+              productionUrl: entry.entrypoint,
+              xperienceUrl: entry.entrypoint,
+              canManage: false,
+              authMode: entry.authMode,
+              offlineCapability: entry.offlineCapability,
+              category: "General",
+              capabilities: [],
+              publicationState: "PUBLISHED",
+              experienced: true,
+              experienceStatus: "ACTIVE",
+            },
+          );
+          setOpened(null);
+        }
+        navigate("experience");
+        return;
+      }
+
+      setExperienceOfflineMessage(null);
+      setMountedFrames((previous) => {
+        const existing = new Map(previous.map((frame) => [frame.id, frame]));
+        const next: { id: string; embedUrl: string; name: string }[] = [];
+        for (const id of plan.mountedIds) {
+          const kept = existing.get(id);
+          if (kept) {
+            next.push(kept);
+            continue;
+          }
+          const entry = nextLineup.find((item) => item.experienceId === id);
+          if (!entry) continue;
+          next.push({ id, embedUrl: entry.entrypoint, name: entry.name });
+        }
+        return next;
+      });
+
+      const activeEntry = nextLineup.find((item) => item.experienceId === toId);
+      if (activeEntry) {
+        const app =
+          options?.app ??
+          directory.find((item) => item.id === toId) ??
+          memberships.find((item) => item.applicationId === toId)?.application;
+        const payloadApp = app ?? {
+          id: activeEntry.experienceId,
+          name: activeEntry.name,
+          version: "1.0.0",
+          origin: activeEntry.origin,
+          productionUrl: activeEntry.entrypoint,
+          xperienceUrl: activeEntry.entrypoint,
+          canManage: false,
+          authMode: activeEntry.authMode,
+          offlineCapability: activeEntry.offlineCapability,
+          category: "General" as const,
+          capabilities: [],
+          publicationState: "PUBLISHED" as const,
+          experienced: true,
+          experienceStatus: "ACTIVE" as const,
+        };
+        const payload = buildLocalOpenPayload(payloadApp, "PUBLIC");
+        setOpened(payload);
+        setFrameReady(plan.fromWarm || plan.sameExperience);
+        setFrameFailed(false);
+        setLaunchingApp(null);
+        rememberOpenedExperience(payloadApp, "PUBLIC");
+      }
+      navigate("experience");
+    },
+    [directory, memberships, navigate],
+  );
+
+  const switchToExperience = useCallback(
+    (experienceId: string) => {
+      const nextLineup = refreshLineup();
+      applyMountPlan(nextLineup, experienceId, activeIdRef.current);
+      dismissSwitcher();
+    },
+    [applyMountPlan, dismissSwitcher, refreshLineup],
+  );
+
+  const switchNext = useCallback(() => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    const nextLineup = refreshLineup();
+    const nextId = nextExperienceId(nextLineup, id);
+    if (nextId) applyMountPlan(nextLineup, nextId, id);
+    bumpSwitcherIdle();
+  }, [applyMountPlan, bumpSwitcherIdle, refreshLineup]);
+
+  const switchPrevious = useCallback(() => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    const nextLineup = refreshLineup();
+    const prevId = previousExperienceId(nextLineup, id);
+    if (prevId) applyMountPlan(nextLineup, prevId, id);
+    bumpSwitcherIdle();
+  }, [applyMountPlan, bumpSwitcherIdle, refreshLineup]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -291,16 +474,21 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setError(null);
 
       if (local.restore) {
+        const nextLineup = buildLineup({
+          online: isOnline,
+          membershipIds: local.memberships.map((item) => item.applicationId),
+          apps: local.directory,
+        });
+        setLineup(nextLineup);
         setExperienceOfflineMessage(local.restore.offlineBlocked ? (local.restore.offlineMessage ?? null) : null);
         setLaunchingApp(local.restore.app);
         if (local.restore.payload && !local.restore.offlineBlocked) {
-          setOpened(local.restore.payload);
-          setFrameReady(false);
-          setFrameFailed(false);
-          navigate("experience", { replace: true });
+          applyMountPlan(nextLineup, local.restore.app.id, null, { app: local.restore.app });
         } else if (local.restore.offlineBlocked) {
-          setOpened(null);
-          navigate("experience", { replace: true });
+          applyMountPlan(nextLineup, local.restore.app.id, null, {
+            app: local.restore.app,
+            offlineMessage: local.restore.offlineMessage,
+          });
         }
       }
 
@@ -345,7 +533,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [api, navigate, props.online]);
+  }, [api, navigate, props.online, applyMountPlan]);
 
   useEffect(() => {
     void load();
@@ -384,10 +572,19 @@ export function ExperienceApp(props: ExperienceAppProps) {
   useEffect(() => () => recognitionRef.current?.abort(), []);
 
   const handleHardwareBack = useCallback(() => {
+    if (switcherOpen) {
+      dismissSwitcher();
+      return true;
+    }
     const current = screenRef.current;
     if (current === "experience") {
+      leaveXperienceMode();
       setOpened(null);
+      setLaunchingApp(null);
+      setMountedFrames([]);
+      setActiveExperienceId(null);
       setFrameFailed(false);
+      setSwitcherOpen(false);
       setScreen("my-experience");
       return true;
     }
@@ -429,13 +626,18 @@ export function ExperienceApp(props: ExperienceAppProps) {
     exitingRef.current = true;
     setExitProbe("requested");
     setExitingExperience(true);
+    dismissSwitcher();
+    leaveXperienceMode();
     vibrateEscapeFeedback();
     window.setTimeout(() => {
       setOpened(null);
       setLaunchingApp(null);
+      setMountedFrames([]);
+      setActiveExperienceId(null);
       setFrameFailed(false);
       setFrameReady(false);
       setEscapeHint(false);
+      setExperienceOfflineMessage(null);
       setExitingExperience(false);
       setAirGrabbed(false);
       exitingRef.current = false;
@@ -443,7 +645,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setScreenStack([]);
       setExitProbe("home");
     }, 220);
-  }, []);
+  }, [dismissSwitcher]);
 
   useEffect(() => {
     window.__oxExperienceActive = screen === "experience";
@@ -534,6 +736,23 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }, [screen, opened, exitExperienceToHome, labsEnabled, labsExperiment]);
 
   useEffect(() => {
+    if (screen !== "experience") return;
+    const cleanups: (() => void)[] = [];
+    for (const node of [switcherEdgeLeftRef.current, switcherEdgeRightRef.current]) {
+      if (!node) continue;
+      cleanups.push(attachDoubleTap(node, openSwitcher));
+    }
+    return () => {
+      for (const stop of cleanups) stop();
+    };
+  }, [screen, opened, openSwitcher, experienceOfflineMessage]);
+
+  useEffect(() => {
+    if (!props.onHardwareBackReady) return;
+    props.onHardwareBackReady(() => handleHardwareBack());
+  }, [props, handleHardwareBack]);
+
+  useEffect(() => {
     if (screen !== "experience" || !opened) {
       setLabsHud(null);
       setNavProgress(0);
@@ -588,32 +807,20 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const openLocalExperience = useCallback(
     (app: DirectoryApplicationView, surface: ApplicationSurfaceType = "PUBLIC") => {
       const posture = shellAuthPosture(app.authMode);
-      void posture; // shell never claims authenticated for any mode
+      void posture;
+      const nextLineup = refreshLineup([app, ...directory]);
       const online = !offline;
       const gate = canOperateOffline(app.offlineCapability, online);
-      if (!gate.ok) {
-        setExperienceOfflineMessage(
-          gate.reason ??
-            "This Experience needs a connection to continue. Your previous state has been preserved.",
-        );
-        setOpened(null);
-        setLaunchingApp(app);
-        setFrameFailed(false);
-        setFrameReady(false);
-        navigate("experience");
-        rememberOpenedExperience(app, surface);
-        return;
-      }
-      setExperienceOfflineMessage(null);
-      const payload = buildLocalOpenPayload(app, surface);
-      setOpened(payload);
-      setLaunchingApp(null);
-      setFrameFailed(false);
-      setFrameReady(false);
-      navigate("experience");
-      rememberOpenedExperience(app, surface);
+      applyMountPlan(nextLineup, app.id, activeIdRef.current, {
+        app,
+        offlineMessage: gate.ok
+          ? null
+          : (gate.reason ??
+            "This Experience needs a connection to continue. Your previous state has been preserved."),
+      });
+      void surface;
     },
-    [navigate, offline],
+    [applyMountPlan, directory, offline, refreshLineup],
   );
 
   const startApplication = useCallback(async (app: DirectoryApplicationView) => {
@@ -649,9 +856,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
       try {
         const payload = await api.openExperience(app.id, { surface: "PUBLIC" });
         markLaunch(trace, "response");
+        const nextLineup = refreshLineup([{ ...app, experienced: true }]);
+        applyMountPlan(nextLineup, app.id, activeIdRef.current, { app: { ...app, experienced: true } });
+        // Prefer server embed URL when available without remounting if already warm.
         setOpened(payload);
         setLaunchingApp(null);
-        rememberOpenedExperience(app, "PUBLIC");
         void refreshMemberships();
       } catch {
         openLocalExperience({ ...app, experienced: true }, "PUBLIC");
@@ -666,7 +875,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setBusyId(null);
     }
-  }, [api, refreshMemberships, navigate, offline, openLocalExperience]);
+  }, [api, refreshMemberships, navigate, offline, openLocalExperience, applyMountPlan, refreshLineup]);
 
   const openApplication = useCallback(async (app: DirectoryApplicationView, surface: ApplicationSurfaceType = "PUBLIC") => {
     if (!app.experienced) {
@@ -694,8 +903,17 @@ export function ExperienceApp(props: ExperienceAppProps) {
     navigate("experience");
     try {
       markLaunch(trace, "request");
-      if (offline) {
+      if (offline || surface === "PUBLIC") {
         openLocalExperience(app, surface);
+        if (!offline) {
+          try {
+            const payload = await api.openExperience(app.id, { surface });
+            setOpened(payload);
+          } catch {
+            /* local mount already active */
+          }
+          void refreshMemberships();
+        }
         summarizeLaunch(trace);
         return;
       }
@@ -1051,7 +1269,26 @@ export function ExperienceApp(props: ExperienceAppProps) {
       </div> : screen === "detail" ? <div className="ox-screen ox-detail"><BackButton /><div className="ox-inline-empty"><p>Select an application from Directory.</p></div></div> : null}
 
       {screen === "my-experience" ? <div data-testid="my-experience" className="ox-screen">
-        <PageHeader title="My Xperience" />
+        <PageHeader title="My Xperience" copy="Manage your lineup. Enter Xperience to switch like channels." />
+        {filteredMemberships.length || lineup.length ? (
+          <button
+            type="button"
+            className="ox-button primary wide"
+            data-testid="enter-xperience"
+            style={{ marginBottom: 14 }}
+            onClick={() => {
+              const nextLineup = refreshLineup();
+              const target =
+                activeExperienceId ??
+                nextLineup[0]?.experienceId ??
+                memberships[0]?.applicationId;
+              if (!target) return;
+              applyMountPlan(nextLineup, target, null);
+            }}
+          >
+            Enter Xperience
+          </button>
+        ) : null}
         <div className="ox-filter-row">{(["All", "Active", "Paused", "Recently Used"] as MembershipFilter[]).map((item) => <button className={membershipFilter === item ? "active" : ""} key={item} onClick={() => setMembershipFilter(item)}>{item}</button>)}</div>
         {loading ? <Skeletons /> : filteredMemberships.length ? <div className="ox-memberships">{filteredMemberships.map((item) => <article key={item.applicationId}>
           <AppGlyph compact app={item.application} /><div><strong>{item.application.name}</strong><small><i className={`ox-status ${item.status.toLowerCase()}`} />{item.status === "ACTIVE" ? "Active" : item.status === "PAUSED" ? "Paused" : "Unavailable"}{item.lastOpenedAt ? ` · Used ${new Date(item.lastOpenedAt).toLocaleDateString()}` : ""}</small></div>
@@ -1138,7 +1375,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         </section>
       </div> : null}
 
-      {screen === "experience" && (opened || launchingApp) ? (
+      {screen === "experience" && (opened || launchingApp || mountedFrames.length > 0) ? (
         <>
           {labsEnabled ? (
             <div className="ox-nav-peek" aria-hidden="true">
@@ -1149,11 +1386,25 @@ export function ExperienceApp(props: ExperienceAppProps) {
           <div
             ref={immersiveRef}
             data-testid="in-app-experience"
+            data-xperience-mode="XPERIENCE"
+            data-switcher-open={switcherOpen ? "1" : "0"}
             className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}${airGrabbed ? " is-grabbed" : ""}${navProgress > 0.02 ? " is-nav-dragging" : ""}`}
           >
-            {escapeHint && !labsEnabled ? (
+            <div
+              ref={switcherEdgeLeftRef}
+              className="ox-switcher-edge is-left"
+              data-testid="switcher-edge-left"
+              aria-label="Double tap to open Switcher"
+            />
+            <div
+              ref={switcherEdgeRightRef}
+              className="ox-switcher-edge is-right"
+              data-testid="switcher-edge-right"
+              aria-label="Double tap to open Switcher"
+            />
+            {escapeHint && !labsEnabled && !switcherOpen ? (
               <div className="ox-escape-hint" role="status">
-                Swipe left or right with two fingers to return to OS Xperience.
+                Double-tap the edge to switch Experiences. Two-finger swipe returns Home.
               </div>
             ) : null}
             {labsEnabled ? (
@@ -1167,7 +1418,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
             <button type="button" className="ox-sr-only" onClick={exitExperienceToHome}>
               Return to OS Xperience Home
             </button>
-            {(launchingApp || (opened && !frameReady && !frameFailed)) && !experienceOfflineMessage ? (
+            <button type="button" className="ox-sr-only" data-testid="summon-switcher" onClick={openSwitcher}>
+              Open Switcher
+            </button>
+            {(launchingApp || (opened && !frameReady && !frameFailed && mountedFrames.length === 0)) && !experienceOfflineMessage ? (
               <section className="ox-launch-shell" aria-live="polite" aria-busy={!opened || !frameReady}>
                 <span className="ox-app-glyph" aria-hidden="true">
                   {initials(launchingApp?.name || opened?.name || "OX")}
@@ -1185,13 +1439,13 @@ export function ExperienceApp(props: ExperienceAppProps) {
                   type="button"
                   onClick={() => {
                     setExperienceOfflineMessage(null);
-                    void load();
+                    openSwitcher();
                   }}
                 >
-                  Retry
+                  Switch Experience
                 </button>
                 <button className="ox-button secondary" type="button" onClick={exitExperienceToHome}>
-                  Stay in Xperience
+                  Leave Xperience
                 </button>
               </section>
             ) : null}
@@ -1206,22 +1460,43 @@ export function ExperienceApp(props: ExperienceAppProps) {
                   Back to Home
                 </button>
               </section>
-            ) : opened && !experienceOfflineMessage ? (
-              <iframe
-                className={`ox-immersive-frame${frameReady ? " is-ready" : " is-loading"}`}
-                title={opened.name}
-                src={opened.embedUrl}
-                sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
-                referrerPolicy="strict-origin-when-cross-origin"
-                onError={() => setFrameFailed(true)}
-                onLoad={() => {
-                  markLaunch(launchTraceRef.current, "first_pixel");
-                  markLaunch(launchTraceRef.current, "interactive");
-                  summarizeLaunch(launchTraceRef.current);
-                  setFrameReady(true);
-                }}
-              />
             ) : null}
+            {!experienceOfflineMessage
+              ? mountedFrames.map((frame) => {
+                  const active = frame.id === activeExperienceId;
+                  return (
+                    <iframe
+                      key={frame.id}
+                      className={`ox-immersive-frame${active && frameReady ? " is-ready" : " is-loading"}${active ? " is-active" : " is-warm"}`}
+                      title={frame.name}
+                      src={frame.embedUrl}
+                      hidden={!active}
+                      aria-hidden={!active}
+                      sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+                      referrerPolicy="strict-origin-when-cross-origin"
+                      onError={() => {
+                        if (active) setFrameFailed(true);
+                      }}
+                      onLoad={() => {
+                        if (!active) return;
+                        markLaunch(launchTraceRef.current, "first_pixel");
+                        markLaunch(launchTraceRef.current, "interactive");
+                        summarizeLaunch(launchTraceRef.current);
+                        setFrameReady(true);
+                      }}
+                    />
+                  );
+                })
+              : null}
+            <ExperienceSwitcher
+              open={switcherOpen}
+              lineup={lineup}
+              activeId={activeExperienceId}
+              onSelect={switchToExperience}
+              onNext={switchNext}
+              onPrevious={switchPrevious}
+              onDismiss={dismissSwitcher}
+            />
           </div>
         </>
       ) : null}

@@ -58,3 +58,29 @@ export {
   writeJson,
   type KvStore,
 } from "./storage.js";
+export {
+  RUNTIME_MODE_KEY,
+  enterXperienceMode,
+  leaveXperienceMode,
+  readRuntimeMode,
+  writeRuntimeMode,
+} from "./mode.js";
+export {
+  LINEUP_KEY,
+  buildLineup,
+  lineupToApps,
+  resolveAvailability,
+  type LineupEntry,
+} from "./lineup.js";
+export {
+  assignRuntimeTiers,
+  captureSafeRestoreHint,
+  indexOfExperience,
+  neighborIds,
+  nextExperienceId,
+  planSwitch,
+  previousExperienceId,
+  shouldRemountExperience,
+  switchingPreservesAuthIsolation,
+  type SwitchPlan,
+} from "./runtime.js";
