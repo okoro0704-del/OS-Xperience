@@ -13,6 +13,7 @@ import {
   type XperienceApiClient,
 } from "@digiconomy/xperience-sdk";
 import {
+  applyCatalogUpdate,
   applyOnlineDirectory,
   bootFromLocal,
   buildLineup,
@@ -20,6 +21,7 @@ import {
   canOperateOffline,
   enterXperienceMode,
   leaveXperienceMode,
+  markRevealSeen,
   nextExperienceId,
   planSwitch,
   previousExperienceId,
@@ -264,6 +266,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [mountedFrames, setMountedFrames] = useState<
     { id: string; embedUrl: string; name: string }[]
   >([]);
+  const [revealBanner, setRevealBanner] = useState<{ id: string; name: string } | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const immersiveRef = useRef<HTMLDivElement | null>(null);
   const switcherEdgeLeftRef = useRef<HTMLDivElement | null>(null);
@@ -497,15 +500,27 @@ export function ExperienceApp(props: ExperienceAppProps) {
       }
 
       try {
-        const [directoryResult, featuredResult, membershipResult] = await Promise.all([
+        const [directoryResult, featuredResult, membershipResult, catalog] = await Promise.all([
           api.listDirectory(),
           api.featuredDirectory(),
           api.listMyExperience(),
+          api.getCatalogManifest().catch(() => null),
         ]);
+        if (catalog) {
+          const applied = await applyCatalogUpdate(catalog);
+          if (applied.ok && applied.newlyLive[0]) {
+            const first = applied.newlyLive[0];
+            setRevealBanner({ id: first.experienceId, name: first.name });
+          }
+        }
         applyOnlineDirectory(directoryResult.applications, membershipResult.experiences);
         setDirectory(directoryResult.applications);
         setFeatured(featuredResult.applications);
         setMemberships(membershipResult.experiences);
+        refreshLineup([
+          ...membershipResult.experiences.map((item) => item.application),
+          ...directoryResult.applications,
+        ]);
         preconnectOrigins([
           ...directoryResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
           ...featuredResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
@@ -533,7 +548,26 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [api, navigate, props.online, applyMountPlan]);
+  }, [api, navigate, props.online, applyMountPlan, refreshLineup]);
+
+  useEffect(() => {
+    const poll = () => {
+      void api
+        .getCatalogManifest()
+        .then(async (catalog) => {
+          const applied = await applyCatalogUpdate(catalog);
+          if (applied.ok && applied.newlyLive[0]) {
+            setRevealBanner({
+              id: applied.newlyLive[0].experienceId,
+              name: applied.newlyLive[0].name,
+            });
+          }
+        })
+        .catch(() => undefined);
+    };
+    const timer = window.setInterval(poll, 45_000);
+    return () => window.clearInterval(timer);
+  }, [api]);
 
   useEffect(() => {
     void load();
@@ -1158,6 +1192,36 @@ export function ExperienceApp(props: ExperienceAppProps) {
     <main className="ox-main" ref={(node) => { mainScrollRef.current = node; }}>
       <div className="ox-topbar"><Brand /><div><button className="ox-icon-button" aria-label="Notifications"><Icon name="bell" /></button><button className="ox-avatar" aria-label="Open profile" onClick={() => navigate("profile")}>{initials(userName)}</button></div></div>
       {offline ? <div className="ox-offline-banner" role="status" data-testid="offline-banner">You&apos;re offline. OS Xperience is running from this installation — online sync will resume when you reconnect.</div> : null}
+      {revealBanner && screen !== "experience" ? (
+        <div className="ox-reveal-banner" role="status" data-testid="reveal-banner">
+          <div>
+            <strong>{revealBanner.name} is now available</strong>
+            <p>A new Experience was revealed for this installation.</p>
+          </div>
+          <button
+            type="button"
+            className="ox-button primary compact"
+            onClick={() => {
+              markRevealSeen([revealBanner.id]);
+              const next = refreshLineup();
+              applyMountPlan(next, revealBanner.id, activeIdRef.current);
+              setRevealBanner(null);
+            }}
+          >
+            Enter
+          </button>
+          <button
+            type="button"
+            className="ox-button secondary compact"
+            onClick={() => {
+              markRevealSeen([revealBanner.id]);
+              setRevealBanner(null);
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
       {error && screen !== "experience" ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
       {screen === "home" ? <div data-testid="home" className="ox-screen ox-home">

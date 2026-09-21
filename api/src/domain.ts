@@ -1,6 +1,7 @@
 import {
   capabilityApprovalIsNotRuntimeAuthorization,
   directoryCategory,
+  isConsumerDiscoverable,
   normalizeExperienceAuthMode,
   normalizeManagementUrl,
   normalizeOfflineCapability,
@@ -18,16 +19,16 @@ import {
   type EvidenceType,
   type ExperienceMembershipStatus,
   type ExperienceMembershipView,
+  type ExperienceReleaseState,
+  type ExperienceVisibility,
   type LifeOSCatalogApplicationClaim,
   type OpenExperiencePayload,
   type ReviewState,
   type VerificationEvidenceView,
 } from "@digiconomy/xperience-contract";
 import { EmptyLifeOSCatalog, type LifeOSCatalogPort } from "./lifeos-catalog.js";
-import {
-  EmptyManagementAccess,
-  type ManagementAccessPort,
-} from "./management-access.js";
+import { EmptyManagementAccess, type ManagementAccessPort } from "./management-access.js";
+import { getReleaseCatalog, type ExperienceReleaseCatalog } from "./release-catalog.js";
 import type { ApplicationRepository } from "./repository.js";
 import type { VerificationService } from "./verification.js";
 
@@ -90,8 +91,24 @@ export class XperienceService {
     private readonly verification?: VerificationService,
     private readonly lifeosCatalog: LifeOSCatalogPort = new EmptyLifeOSCatalog(),
     private readonly managementAccess: ManagementAccessPort = new EmptyManagementAccess(),
+    private readonly releaseCatalog: ExperienceReleaseCatalog = getReleaseCatalog(),
   ) {}
 
+  private releaseOverlay(experienceId: string): {
+    releaseState?: ExperienceReleaseState;
+    visibility?: ExperienceVisibility;
+  } {
+    const entry = this.releaseCatalog.get(experienceId);
+    if (!entry) return {};
+    return { releaseState: entry.releaseState, visibility: entry.visibility };
+  }
+
+  private isDirectoryEligible(experienceId: string): boolean {
+    const entry = this.releaseCatalog.get(experienceId);
+    // Apps not yet in release catalog remain visible (legacy published) — X3 seeds cover known ones.
+    if (!entry) return true;
+    return isConsumerDiscoverable(entry.releaseState, entry.visibility);
+  }
   private async log(
     action: string,
     actor: Actor,
@@ -483,11 +500,15 @@ export class XperienceService {
     }
 
     return [...byId.values()].filter((app) => {
+      if (!this.isDirectoryEligible(app.id)) return false;
       if (category && app.category !== category) return false;
       if (!q) return true;
       const hay =
         `${app.name} ${app.id} ${app.category} ${app.capabilities.join(" ")} ${app.developerName ?? ""} ${app.description ?? ""}`.toLowerCase();
       return hay.includes(q);
+    }).map((app) => {
+      const overlay = this.releaseOverlay(app.id);
+      return { ...app, ...overlay };
     });
   }
 
@@ -615,6 +636,15 @@ export class XperienceService {
     options?: { surface?: ApplicationSurfaceType },
   ): Promise<OpenExperiencePayload> {
     this.requireUser(actor);
+    const release = this.releaseCatalog.get(applicationId);
+    if (release && release.releaseState !== "LIVE") {
+      throw new DomainError(
+        release.releaseState === "PAUSED"
+          ? "This Experience is temporarily paused."
+          : "This Experience is not available yet.",
+        "forbidden",
+      );
+    }
     const selection = await this.repository.findExperienceSelection(actor.id, applicationId);
     if (!selection) throw new DomainError("Application is not in your Experience.", "not_found");
     const resolved = await this.resolvePublished(applicationId);
@@ -668,7 +698,74 @@ export class XperienceService {
   /** Featured / recently published directory ordering — not personalized recommendations. */
   async listFeaturedDirectory(actor: Actor): Promise<DirectoryApplicationView[]> {
     const apps = await this.listDirectory(actor);
-    return apps.slice(0, 12);
+    return apps
+      .filter((app) => {
+        const entry = this.releaseCatalog.get(app.id);
+        if (!entry) return true;
+        return entry.visibility === "FEATURED" && entry.releaseState === "LIVE";
+      })
+      .slice(0, 12);
+  }
+
+  // --- Phase X3 release control ---
+
+  async getDeviceCatalog(_actor: Actor | null) {
+    return this.releaseCatalog.buildDeviceSignedCatalog();
+  }
+
+  async getConsumerCatalog(actor: Actor) {
+    this.requireUser(actor);
+    return this.releaseCatalog.buildConsumerSignedCatalog();
+  }
+
+  async listReleaseCatalog(actor: Actor) {
+    this.requireAdmin(actor);
+    return {
+      experiences: this.releaseCatalog.listAdmin(),
+      audits: this.releaseCatalog.listAudits(),
+      manifestVersion: (await this.releaseCatalog.buildSignedCatalog()).payload.manifestVersion,
+    };
+  }
+
+  async changeExperienceRelease(
+    actor: Actor,
+    experienceId: string,
+    input: {
+      releaseState: ExperienceReleaseState;
+      visibility?: ExperienceVisibility;
+      confirmLive?: boolean;
+      action?: "preload" | "lock" | "go-live" | "pause" | "retire";
+    },
+  ) {
+    this.requireAdmin(actor);
+    let entry;
+    if (input.action === "preload") entry = this.releaseCatalog.preload(actor, experienceId);
+    else if (input.action === "lock") entry = this.releaseCatalog.lock(actor, experienceId);
+    else if (input.action === "go-live") {
+      entry = this.releaseCatalog.goLive(actor, experienceId, input.visibility ?? "FEATURED");
+    } else if (input.action === "pause") entry = this.releaseCatalog.pause(actor, experienceId);
+    else if (input.action === "retire") entry = this.releaseCatalog.retire(actor, experienceId);
+    else {
+      entry = this.releaseCatalog.changeRelease(actor, experienceId, {
+        releaseState: input.releaseState,
+        visibility: input.visibility,
+        confirmLive: input.confirmLive,
+      });
+    }
+    await this.log(
+      "experience.release.changed",
+      actor,
+      experienceId,
+      `${entry.releaseState}/${entry.visibility}`,
+    );
+    return {
+      experience: entry,
+      catalog: await this.releaseCatalog.buildDeviceSignedCatalog(),
+    };
+  }
+
+  releaseCatalogPort(): ExperienceReleaseCatalog {
+    return this.releaseCatalog;
   }
 }
 

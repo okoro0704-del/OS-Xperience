@@ -225,6 +225,63 @@ async function route(
     return send(res, 200, { events: await service.listAudit(actor) });
   }
 
+  // Phase X3 — signed catalog + admin release control + SSE notify
+  if (req.method === "GET" && path === "/v1/catalog/manifest") {
+    // Device catalog (includes PRELOADED) — no auth required for download integrity blob;
+    // release promotion still requires admin. Local edits without signature are rejected client-side.
+    return send(res, 200, await service.getDeviceCatalog(actor));
+  }
+
+  if (req.method === "GET" && path === "/v1/catalog/consumer") {
+    return send(res, 200, await service.getConsumerCatalog(actor));
+  }
+
+  if (req.method === "GET" && path === "/v1/catalog/events") {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.writeHead(200);
+    const signed = await service.getDeviceCatalog(actor);
+    res.write(
+      `event: EXPERIENCE_CATALOG_UPDATED\ndata: ${JSON.stringify({ manifestVersion: signed.payload.manifestVersion })}\n\n`,
+    );
+    const catalog = service.releaseCatalogPort();
+    const unsub = catalog.onChange((manifestVersion) => {
+      res.write(
+        `event: EXPERIENCE_CATALOG_UPDATED\ndata: ${JSON.stringify({ manifestVersion })}\n\n`,
+      );
+    });
+    req.on("close", () => unsub());
+    return;
+  }
+
+  if (req.method === "GET" && path === "/v1/admin/releases") {
+    return send(res, 200, await service.listReleaseCatalog(actor));
+  }
+
+  const releaseMatch = path.match(/^\/v1\/admin\/releases\/([^/]+)(?:\/(preload|lock|go-live|pause|retire))?$/);
+  if (releaseMatch) {
+    const [, id, action] = releaseMatch;
+    if (req.method === "POST") {
+      const body = (await readBody(req)) as Record<string, unknown>;
+      return send(
+        res,
+        200,
+        await service.changeExperienceRelease(actor, id, {
+          action: action as "preload" | "lock" | "go-live" | "pause" | "retire" | undefined,
+          releaseState: (typeof body.releaseState === "string"
+            ? body.releaseState
+            : "LIVE") as import("@digiconomy/xperience-contract").ExperienceReleaseState,
+          visibility:
+            body.visibility === "HIDDEN" || body.visibility === "LISTED" || body.visibility === "FEATURED"
+              ? body.visibility
+              : undefined,
+          confirmLive: body.confirmLive === true || action === "go-live",
+        }),
+      );
+    }
+  }
+
   const adminMatch = path.match(
     /^\/v1\/admin\/applications\/([^/]+)(?:\/(evidence|audit|capabilities|actions\/([^/]+)))?$/,
   );

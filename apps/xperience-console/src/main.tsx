@@ -25,7 +25,7 @@ type DevView =
   | "testing"
   | "submit"
   | "review";
-type AdminView = "overview" | "queue" | "detail" | "evidence" | "capabilities" | "actions" | "audit";
+type AdminView = "overview" | "queue" | "detail" | "evidence" | "capabilities" | "actions" | "releases" | "audit";
 
 const API_BASE = import.meta.env.VITE_XPERIENCE_API_URL ?? "http://localhost:4100";
 
@@ -151,6 +151,7 @@ function App() {
     { id: "evidence", label: "Verification evidence" },
     { id: "capabilities", label: "Capability review" },
     { id: "actions", label: "Review actions" },
+    { id: "releases", label: "Experience releases" },
     { id: "audit", label: "Audit history" },
   ];
 
@@ -238,6 +239,7 @@ function App() {
             queue={queue}
             selected={selected}
             audit={audit}
+            api={api}
             onOpen={(id) => openApp(id, "detail")}
             onAction={(action, reason) =>
               selected && run(() => api.adminAction(selected.id, action, reason), `Action ${action} applied.`)
@@ -380,11 +382,15 @@ function AdminPanels(props: {
   queue: ApplicationView[];
   selected: ApplicationView | null;
   audit: AuditEventView[];
+  api: ReturnType<typeof createXperienceApiClient>;
   onOpen: (id: string) => void;
   onAction: (action: string, reason?: string) => void;
   onCapability: (capability: Capability, status: "APPROVED" | "REJECTED" | "REQUIRES_CHANGES") => void;
 }) {
   const { view, queue, selected, audit } = props;
+  if (view === "releases") {
+    return <ReleaseControlPanel api={props.api} />;
+  }
   if (view === "overview" || view === "queue") {
     return (
       <>
@@ -669,6 +675,115 @@ function EvidenceForm({
           Claim evidence
         </button>
       </form>
+    </article>
+  );
+}
+
+function ReleaseControlPanel({ api }: { api: XperienceApiClient }) {
+  const [rows, setRows] = useState<
+    Awaited<ReturnType<XperienceApiClient["listReleases"]>>["experiences"]
+  >([]);
+  const [audits, setAudits] = useState<unknown[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [version, setVersion] = useState(0);
+
+  async function refresh() {
+    try {
+      const data = await api.listReleases();
+      setRows(data.experiences);
+      setAudits(data.audits);
+      setVersion(data.manifestVersion);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to load releases.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+  }, [api]);
+
+  async function act(
+    id: string,
+    action: "preload" | "lock" | "go-live" | "pause" | "retire",
+  ) {
+    if (action === "go-live") {
+      const ok = window.confirm(`Go LIVE with ${id}? Audience devices will receive this Experience.`);
+      if (!ok) return;
+    }
+    setBusy(`${id}:${action}`);
+    try {
+      await api.releaseAction(id, action, {
+        visibility: action === "go-live" ? "FEATURED" : undefined,
+        confirmLive: action === "go-live",
+      });
+      await refresh();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Release action failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <article className="panel wide" data-testid="admin-releases">
+      <div className="panel-head">
+        <h2>Experience releases</h2>
+        <small>manifest v{version}</small>
+      </div>
+      <p className="next">
+        Preload packages invisibly, then Go Live to reveal — no new PWA install. Release state is separate from
+        authMode.
+      </p>
+      {error ? <p className="state bad">{error}</p> : null}
+      <table data-testid="release-table">
+        <thead>
+          <tr>
+            <th>Experience</th>
+            <th>State</th>
+            <th>Visibility</th>
+            <th>Auth</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.experienceId} data-testid={`release-row-${row.experienceId}`}>
+              <td>
+                <b>{row.name}</b>
+                <div>
+                  <small>{row.experienceId}</small>
+                </div>
+              </td>
+              <td>{row.releaseState}</td>
+              <td>{row.visibility}</td>
+              <td>{row.authMode}</td>
+              <td className="actions">
+                {(["preload", "lock", "go-live", "pause", "retire"] as const).map((action) => (
+                  <button
+                    key={action}
+                    className="secondary"
+                    disabled={busy === `${row.experienceId}:${action}`}
+                    data-testid={`release-${action}-${row.experienceId}`}
+                    onClick={() => void act(row.experienceId, action)}
+                  >
+                    {action}
+                  </button>
+                ))}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <h3>Release audit</h3>
+      <ul>
+        {audits.slice(0, 12).map((item, index) => (
+          <li key={index}>
+            <code>{JSON.stringify(item)}</code>
+          </li>
+        ))}
+      </ul>
     </article>
   );
 }

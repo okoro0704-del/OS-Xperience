@@ -89,6 +89,12 @@ export interface ExperienceRegistryEntry {
   managementUrl?: string;
   category?: string;
   description?: string;
+  /** Admin release control — never trust client-only edits without signed catalog. */
+  releaseState?: import("./release.js").ExperienceReleaseState;
+  visibility?: import("./release.js").ExperienceVisibility;
+  preloadPolicy?: import("./release.js").PreloadPolicy;
+  packageVersion?: string;
+  contentHash?: string;
 }
 
 /**
@@ -373,6 +379,9 @@ export interface DirectoryApplicationView {
   authMode?: ExperienceAuthMode;
   /** How far this Experience can operate without network. */
   offlineCapability?: OfflineCapability;
+  /** Server release gate — separate from authMode. */
+  releaseState?: import("./release.js").ExperienceReleaseState;
+  visibility?: import("./release.js").ExperienceVisibility;
   category: Exclude<DirectoryCategory, "All">;
   capabilities: Capability[];
   publicationState: "PUBLISHED" | "NOT_PUBLISHED";
@@ -600,4 +609,30 @@ export {
   type ExperienceUtterance,
   type ExperienceRouteCategory,
 } from "./experience-utterance.js";
+
+export {
+  EXPERIENCE_RELEASE_STATES,
+  EXPERIENCE_VISIBILITIES,
+  PRELOAD_POLICIES,
+  LOCAL_PACKAGE_STATES,
+  normalizeReleaseState,
+  normalizeVisibility,
+  normalizePreloadPolicy,
+  releaseTransitionAllowed,
+  isConsumerDiscoverable,
+  canLaunchByRelease,
+  canPreloadByRelease,
+  canonicalCatalogJson,
+  hmacSha256Hex,
+  signExperienceCatalog,
+  verifyExperienceCatalog,
+  assertCatalogReleaseIntegrity,
+  type ExperienceReleaseState,
+  type ExperienceVisibility,
+  type PreloadPolicy,
+  type LocalPackageState,
+  type CatalogExperienceEntry,
+  type ExperienceCatalogPayload,
+  type SignedExperienceCatalog,
+} from "./release.js";
 

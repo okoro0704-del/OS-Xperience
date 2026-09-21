@@ -170,6 +170,31 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
       request<OpenExperiencePayload>("POST", `/v1/experience/${encodeURIComponent(id)}/open`, {
         surface: options?.surface === "MANAGEMENT" ? "MANAGEMENT" : "PUBLIC",
       }),
+    getCatalogManifest: () =>
+      request<import("@digiconomy/xperience-contract").SignedExperienceCatalog>(
+        "GET",
+        "/v1/catalog/manifest",
+      ),
+    getConsumerCatalog: () =>
+      request<import("@digiconomy/xperience-contract").SignedExperienceCatalog>(
+        "GET",
+        "/v1/catalog/consumer",
+      ),
+    listReleases: () =>
+      request<{
+        experiences: import("@digiconomy/xperience-contract").CatalogExperienceEntry[];
+        audits: unknown[];
+        manifestVersion: number;
+      }>("GET", "/v1/admin/releases"),
+    releaseAction: (
+      id: string,
+      action: "preload" | "lock" | "go-live" | "pause" | "retire",
+      body?: { visibility?: string; confirmLive?: boolean },
+    ) =>
+      request<{
+        experience: import("@digiconomy/xperience-contract").CatalogExperienceEntry;
+        catalog: import("@digiconomy/xperience-contract").SignedExperienceCatalog;
+      }>("POST", `/v1/admin/releases/${encodeURIComponent(id)}/${action}`, body ?? {}),
   };
 }
 

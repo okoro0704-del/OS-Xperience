@@ -816,6 +816,20 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
   margin-top: 8px;
 }
 
+.ox-reveal-banner {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 10px;
+  align-items: center;
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(120, 170, 255, .35);
+  background: linear-gradient(120deg, rgba(24, 48, 92, .92), rgba(12, 20, 36, .94));
+}
+.ox-reveal-banner strong { display: block; font-family: "Outfit", sans-serif; font-size: 15px; }
+.ox-reveal-banner p { margin: 2px 0 0; color: #9eb4d8; font-size: 12px; }
+
 @media (prefers-reduced-motion: reduce) {
   .ox-in-app.ox-immersive.is-nav-dragging {
     transition: none !important;

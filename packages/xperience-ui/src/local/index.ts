@@ -84,3 +84,18 @@ export {
   switchingPreservesAuthIsolation,
   type SwitchPlan,
 } from "./runtime.js";
+export {
+  CATALOG_KEY,
+  applyCatalogUpdate,
+  catalogEntryLaunchable,
+  catalogVerifySecret,
+  filterDiscoverableCatalog,
+  getPackageState,
+  localReleaseClaimAllowed,
+  markRevealSeen,
+  preloadExperiencePackage,
+  readPackageStates,
+  readSignedCatalog,
+  storeSignedCatalog,
+  writePackageState,
+} from "./catalog.js";
