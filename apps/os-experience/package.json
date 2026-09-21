@@ -13,7 +13,8 @@
     "cap:sync:ios": "npm run build && npx cap sync ios",
     "cap:android": "npx cap open android",
     "cap:ios": "npx cap open ios",
-    "android:debug": "npm run cap:sync:android && cd android && gradlew.bat assembleDebug",
+    "android:debug": "npm run cap:sync:android && cd android && gradlew.bat assembleDebug && node ../../../scripts/publish-os-experience-apk.mjs",
+    "android:publish-apk": "node ../../scripts/publish-os-experience-apk.mjs",
     "ios:prepare": "npm run cap:sync:ios"
   },
   "dependencies": {

@@ -27,7 +27,9 @@ import {
   type VerificationEvidenceView,
 } from "@digiconomy/xperience-contract";
 import { EmptyLifeOSCatalog, type LifeOSCatalogPort } from "./lifeos-catalog.js";
+import { getCatalogSigningKeys } from "./catalog-keys.js";
 import { EmptyManagementAccess, type ManagementAccessPort } from "./management-access.js";
+import { getPresentationControl } from "./presentation-control.js";
 import { getReleaseCatalog, type ExperienceReleaseCatalog } from "./release-catalog.js";
 import type { ApplicationRepository } from "./repository.js";
 import type { VerificationService } from "./verification.js";
@@ -766,6 +768,99 @@ export class XperienceService {
 
   releaseCatalogPort(): ExperienceReleaseCatalog {
     return this.releaseCatalog;
+  }
+
+  async getCatalogPublicKey() {
+    const keys = await getCatalogSigningKeys();
+    return { algorithm: "Ed25519" as const, publicKeySpkiBase64: keys.publicKeySpkiBase64 };
+  }
+
+  private presentations() {
+    return getPresentationControl(this.releaseCatalog);
+  }
+
+  listPresentations(actor: Actor) {
+    this.requireAdmin(actor);
+    return { presentations: this.presentations().list() };
+  }
+
+  getPresentation(actor: Actor, id: string) {
+    this.requireAdmin(actor);
+    return this.presentations().get(id);
+  }
+
+  createPresentation(
+    actor: Actor,
+    body: {
+      title: string;
+      chapters: Array<{
+        title: string;
+        experienceId: string;
+        action?: string;
+        visibility?: string;
+        notes?: string;
+      }>;
+      skipRevealConfirm?: boolean;
+    },
+  ) {
+    this.requireAdmin(actor);
+    return this.presentations().create(actor, {
+      title: body.title,
+      skipRevealConfirm: body.skipRevealConfirm,
+      chapters: (body.chapters ?? []).map((chapter) => ({
+        title: chapter.title,
+        experienceId: chapter.experienceId,
+        action: chapter.action as import("@digiconomy/xperience-contract").ChapterAction | undefined,
+        visibility: chapter.visibility as import("@digiconomy/xperience-contract").ExperienceVisibility | undefined,
+        notes: chapter.notes,
+      })),
+    });
+  }
+
+  presentationAction(
+    actor: Actor,
+    id: string,
+    action:
+      | "ready"
+      | "start"
+      | "pause"
+      | "resume"
+      | "end"
+      | "next"
+      | "previous"
+      | "reveal-current"
+      | "select-chapter",
+    body?: { chapterId?: string; confirm?: boolean },
+  ) {
+    this.requireAdmin(actor);
+    const ctrl = this.presentations();
+    switch (action) {
+      case "ready":
+        return { presentation: ctrl.markReady(actor, id) };
+      case "start":
+        return { presentation: ctrl.start(actor, id) };
+      case "pause":
+        return { presentation: ctrl.pause(actor, id) };
+      case "resume":
+        return { presentation: ctrl.resume(actor, id) };
+      case "end":
+        return { presentation: ctrl.end(actor, id) };
+      case "next":
+        return { presentation: ctrl.nextChapter(actor, id) };
+      case "previous":
+        return { presentation: ctrl.previousChapter(actor, id) };
+      case "select-chapter":
+        if (!body?.chapterId) throw new DomainError("chapterId required.");
+        return { presentation: ctrl.goToChapter(actor, id, body.chapterId) };
+      case "reveal-current":
+        return ctrl.revealCurrent(actor, id, { confirm: body?.confirm });
+      default:
+        throw new DomainError("Unknown presentation action.", "not_found");
+    }
+  }
+
+  audiencePresentationState(_actor: Actor | null) {
+    return { presentation: this.presentations().audienceState() };
   }
 }
 

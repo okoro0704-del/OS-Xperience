@@ -44,7 +44,7 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
     return;
   }
 
-  assert.match(indexHtml, /OS Experience/);
+  assert.match(indexHtml, /OS Xperience/);
   assert.doesNotMatch(indexHtml, /OS Shell 2\.0\.1/);
 
   let chromium: typeof import("playwright").chromium;

@@ -25,7 +25,16 @@ type DevView =
   | "testing"
   | "submit"
   | "review";
-type AdminView = "overview" | "queue" | "detail" | "evidence" | "capabilities" | "actions" | "releases" | "audit";
+type AdminView =
+  | "overview"
+  | "queue"
+  | "detail"
+  | "evidence"
+  | "capabilities"
+  | "actions"
+  | "releases"
+  | "presentation"
+  | "audit";
 
 const API_BASE = import.meta.env.VITE_XPERIENCE_API_URL ?? "http://localhost:4100";
 
@@ -152,6 +161,7 @@ function App() {
     { id: "capabilities", label: "Capability review" },
     { id: "actions", label: "Review actions" },
     { id: "releases", label: "Experience releases" },
+    { id: "presentation", label: "Presentation Control" },
     { id: "audit", label: "Audit history" },
   ];
 
@@ -390,6 +400,9 @@ function AdminPanels(props: {
   const { view, queue, selected, audit } = props;
   if (view === "releases") {
     return <ReleaseControlPanel api={props.api} />;
+  }
+  if (view === "presentation") {
+    return <PresentationControlPanel api={props.api} />;
   }
   if (view === "overview" || view === "queue") {
     return (
@@ -784,6 +797,218 @@ function ReleaseControlPanel({ api }: { api: XperienceApiClient }) {
           </li>
         ))}
       </ul>
+    </article>
+  );
+}
+
+type PresentationViewModel = Awaited<ReturnType<XperienceApiClient["getPresentation"]>>;
+
+function PresentationControlPanel({ api }: { api: XperienceApiClient }) {
+  const [presentation, setPresentation] = useState<PresentationViewModel | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [confirmReveal, setConfirmReveal] = useState(false);
+
+  async function refresh() {
+    try {
+      const listed = await api.listPresentations();
+      const first = listed.presentations[0];
+      if (!first) {
+        setPresentation(null);
+        setError(null);
+        return;
+      }
+      const detail = await api.getPresentation(first.id);
+      setPresentation(detail);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Failed to load presentation.");
+    }
+  }
+
+  useEffect(() => {
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 15_000);
+    return () => window.clearInterval(timer);
+  }, [api]);
+
+  async function run(
+    action: Parameters<XperienceApiClient["presentationAction"]>[1],
+    body?: { chapterId?: string; confirm?: boolean },
+  ) {
+    if (!presentation) return;
+    setBusy(action);
+    try {
+      const result = await api.presentationAction(presentation.id, action, body);
+      setPresentation(result.presentation);
+      setConfirmReveal(false);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Presentation action failed.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  if (!presentation) {
+    return (
+      <article className="panel wide" data-testid="admin-presentation">
+        <h2>Presentation Control</h2>
+        {error ? <p className="state bad">{error}</p> : <p className="next">No presentation configured.</p>}
+      </article>
+    );
+  }
+
+  const current = presentation.currentChapter;
+  const next = presentation.nextChapter;
+  const live = presentation.status === "LIVE" || presentation.status === "PAUSED";
+
+  return (
+    <article className="panel wide" data-testid="admin-presentation">
+      <div className="panel-head">
+        <h2>OS XPERIENCE — LIVE PRESENTATION</h2>
+        <small>{presentation.status}</small>
+      </div>
+      <p className="next">{presentation.title}</p>
+      {error ? <p className="state bad">{error}</p> : null}
+
+      <div className="metrics" style={{ marginBottom: "1rem" }}>
+        <article className="metric">
+          <b>Current</b>
+          <span>
+            {current ? `Chapter ${current.order} — ${current.title}` : "—"}
+          </span>
+        </article>
+        <article className="metric">
+          <b>Next</b>
+          <span>{next ? `Chapter ${next.order} — ${next.title}` : "—"}</span>
+        </article>
+      </div>
+
+      <div className="actions" style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", marginBottom: "1.25rem" }}>
+        {presentation.status === "DRAFT" || presentation.status === "READY" ? (
+          <button
+            className="primary"
+            disabled={Boolean(busy)}
+            data-testid="presentation-start"
+            onClick={() => void run("start")}
+          >
+            Start Presentation
+          </button>
+        ) : null}
+        <button
+          className="secondary"
+          disabled={!live || !presentation.previousChapter || Boolean(busy)}
+          data-testid="presentation-previous"
+          onClick={() => void run("previous")}
+        >
+          Previous
+        </button>
+        <button
+          className="primary"
+          disabled={!live || Boolean(busy)}
+          data-testid="presentation-reveal"
+          onClick={() => {
+            if (presentation.skipRevealConfirm) {
+              void run("reveal-current", { confirm: true });
+              return;
+            }
+            setConfirmReveal(true);
+          }}
+        >
+          Reveal Current
+        </button>
+        <button
+          className="secondary"
+          disabled={!live || !next || Boolean(busy)}
+          data-testid="presentation-next"
+          onClick={() => void run("next")}
+        >
+          Next Chapter
+        </button>
+        {presentation.status === "LIVE" ? (
+          <button
+            className="secondary"
+            disabled={Boolean(busy)}
+            data-testid="presentation-pause"
+            onClick={() => void run("pause")}
+          >
+            Pause Presentation
+          </button>
+        ) : null}
+        {presentation.status === "PAUSED" ? (
+          <button
+            className="primary"
+            disabled={Boolean(busy)}
+            data-testid="presentation-resume"
+            onClick={() => void run("resume")}
+          >
+            Resume
+          </button>
+        ) : null}
+        {live ? (
+          <button
+            className="secondary"
+            disabled={Boolean(busy)}
+            data-testid="presentation-end"
+            onClick={() => void run("end")}
+          >
+            End
+          </button>
+        ) : null}
+      </div>
+
+      {confirmReveal && current ? (
+        <div className="panel" data-testid="presentation-reveal-confirm" style={{ marginBottom: "1rem" }}>
+          <p>
+            Reveal <b>{current.title}</b> to the audience?
+          </p>
+          <p className="next">This will make the Experience LIVE and FEATURED.</p>
+          <div className="actions" style={{ display: "flex", gap: "0.5rem" }}>
+            <button className="secondary" data-testid="presentation-reveal-cancel" onClick={() => setConfirmReveal(false)}>
+              Cancel
+            </button>
+            <button
+              className="primary"
+              data-testid="presentation-reveal-confirm-btn"
+              disabled={Boolean(busy)}
+              onClick={() => void run("reveal-current", { confirm: true })}
+            >
+              Reveal
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      <h3>Chapters</h3>
+      <table data-testid="presentation-chapters">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Experience</th>
+            <th>Action</th>
+            <th>Pointer</th>
+          </tr>
+        </thead>
+        <tbody>
+          {presentation.chapters.map((chapter) => {
+            const isCurrent = chapter.id === presentation.currentChapterId;
+            return (
+              <tr key={chapter.id} data-testid={`presentation-chapter-${chapter.order}`}>
+                <td>{chapter.order}</td>
+                <td>
+                  <b>{chapter.title}</b>
+                  <div>
+                    <small>{chapter.experienceId}</small>
+                  </div>
+                </td>
+                <td>{chapter.action}</td>
+                <td>{isCurrent ? (presentation.status === "LIVE" ? "LIVE" : presentation.status) : "READY"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </article>
   );
 }

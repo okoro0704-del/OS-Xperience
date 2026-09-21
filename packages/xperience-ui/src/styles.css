@@ -590,15 +590,109 @@ html.ox-native-shell .ox-bottom-nav {
 .ox-frame-fallback h1, .ox-frame-fallback p { margin: 0; }
 .ox-frame-fallback p { color: var(--ox-text-secondary); }
 
-.ox-bottom-nav { position: fixed; inset: auto 0 0; z-index: 30; display: grid; height: calc(var(--ox-nav-h) + var(--ox-safe-bottom)); grid-template-columns: repeat(5, 1fr); align-items: start; padding: 8px 5px var(--ox-safe-bottom); border-top: 1px solid var(--ox-border); background: rgba(6, 10, 19, .94); backdrop-filter: blur(22px); }
-.ox-bottom-nav > button { display: grid; min-width: 0; justify-items: center; gap: 4px; padding: 5px 1px; color: #7d899e; border: 0; background: transparent; cursor: pointer; }
-.ox-bottom-nav > button > span { overflow: hidden; max-width: 100%; font-size: 10px; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
-.ox-bottom-nav > button.active { color: #82acff; }
-.ox-bottom-nav .ox-mobile-mic { position: relative; color: white; transform: translateY(-23px); }
+.ox-bottom-nav {
+  position: fixed;
+  inset: auto 0 0;
+  z-index: 30;
+  display: grid;
+  height: calc(var(--ox-nav-h) + var(--ox-safe-bottom));
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(148px, 1.55fr) minmax(0, 1fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 2px;
+  padding: 6px 4px var(--ox-safe-bottom);
+  border-top: 1px solid var(--ox-border);
+  background: rgba(6, 10, 19, .94);
+  backdrop-filter: blur(22px);
+}
+.ox-bottom-nav > .ox-nav-dest {
+  display: grid;
+  min-width: 0;
+  justify-items: center;
+  gap: 3px;
+  padding: 8px 2px 4px;
+  color: #6f7c91;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  opacity: .88;
+}
+.ox-bottom-nav > .ox-nav-dest > span {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 9px;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ox-bottom-nav > .ox-nav-dest.active {
+  color: #9bb8ef;
+  opacity: 1;
+}
+.ox-bottom-nav > .ox-nav-dest .ox-icon {
+  width: 20px;
+  height: 20px;
+}
+.ox-mode-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: stretch;
+  align-self: start;
+  min-width: 0;
+  margin-top: 2px;
+  padding: 3px;
+  border: 1px solid rgba(130, 172, 255, .28);
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(22, 34, 58, .95), rgba(10, 16, 30, .98));
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, .35),
+    inset 0 1px 0 rgba(255, 255, 255, .06);
+}
+.ox-mode-switch.has-mode {
+  border-color: rgba(130, 172, 255, .42);
+}
+.ox-mode-switch > button {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 0;
+  padding: 7px 4px 6px;
+  color: #8b97ab;
+  border: 0;
+  border-radius: 13px;
+  background: transparent;
+  cursor: pointer;
+  transition: color .18s ease, background .18s ease, box-shadow .18s ease;
+}
+.ox-mode-switch > button > span {
+  overflow: hidden;
+  max-width: 100%;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ox-mode-switch > button .ox-icon {
+  width: 18px;
+  height: 18px;
+}
+.ox-mode-switch > button.is-active {
+  color: #f4f8ff;
+  background: linear-gradient(145deg, #3d7ef0, #1a4fb8);
+  box-shadow: 0 4px 14px rgba(47, 123, 255, .34);
+}
+.ox-mode-switch-divider {
+  display: grid;
+  place-items: center;
+  padding: 0 1px;
+  color: #5d6b82;
+  font-size: 11px;
+  line-height: 1;
+  user-select: none;
+}
 html.ox-keyboard-open .ox-bottom-nav { display: none; }
 html.ox-keyboard-open .ox-main { padding-bottom: 24px; }
-.ox-mobile-mic > span { display: grid; width: 56px; height: 56px; place-items: center; overflow: visible; border: 5px solid var(--ox-bg); border-radius: 50%; background: linear-gradient(145deg, #4289ff, #174bc3); box-shadow: 0 7px 25px rgba(47,123,255,.42); }
-.ox-mobile-mic small { color: #8995a9; font-size: 8px; }
 
 .ox-modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 20px; background: rgba(0, 3, 9, .78); backdrop-filter: blur(8px); }
 .ox-modal { width: min(430px, 100%); padding: 30px; border: 1px solid var(--ox-border-strong); border-radius: 22px; background: #101827; box-shadow: 0 30px 90px rgba(0,0,0,.55); text-align: center; }

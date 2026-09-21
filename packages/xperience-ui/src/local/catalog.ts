@@ -11,15 +11,20 @@ import {
 import { readJson, writeJson } from "./storage.js";
 
 export const CATALOG_KEY = "ox.signed-catalog.v1";
+export const CATALOG_PUBLIC_KEY_KEY = "ox.catalog-public-key.v1";
 export const PACKAGE_STATE_KEY = "ox.package-states.v1";
 export const REVEAL_BANNER_KEY = "ox.reveal-banner.v1";
 
-export function catalogVerifySecret(): string {
+/** Public verification key only — never a private signing key. */
+export function catalogPublicKeySpki(): string | null {
   const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  return (
-    env?.VITE_XPERIENCE_CATALOG_HMAC?.trim() ||
-    "xperience-dev-catalog-hmac-not-for-production"
-  );
+  const fromEnv = env?.VITE_XPERIENCE_CATALOG_PUBLIC_KEY?.trim();
+  if (fromEnv) return fromEnv;
+  return readJson<{ publicKeySpkiBase64?: string }>(CATALOG_PUBLIC_KEY_KEY)?.publicKeySpkiBase64 ?? null;
+}
+
+export function storeCatalogPublicKey(publicKeySpkiBase64: string): void {
+  writeJson(CATALOG_PUBLIC_KEY_KEY, { publicKeySpkiBase64, algorithm: "Ed25519" });
 }
 
 export function readSignedCatalog(): SignedExperienceCatalog | null {
@@ -28,9 +33,12 @@ export function readSignedCatalog(): SignedExperienceCatalog | null {
 
 export async function storeSignedCatalog(
   catalog: SignedExperienceCatalog,
-  secret = catalogVerifySecret(),
+  publicKeySpki = catalogPublicKeySpki(),
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-  const valid = await verifyExperienceCatalog(catalog, secret);
+  if (!publicKeySpki) {
+    return { ok: false, reason: "Catalog public key missing — cannot verify signature." };
+  }
+  const valid = await verifyExperienceCatalog(catalog, publicKeySpki);
   if (!valid) return { ok: false, reason: "Catalog signature invalid or expired." };
   writeJson(CATALOG_KEY, catalog);
   return { ok: true };
@@ -74,8 +82,6 @@ export async function preloadExperiencePackage(
   try {
     const url = entry.packageUrl || entry.entrypoint;
     const response = await fetchImpl(url, { method: "GET", mode: "cors" });
-    // Cross-origin may fail; for X3 we accept hash match against declared metadata when fetch ok,
-    // or mark READY_BUT_LOCKED when release is PRELOADED/LOCKED even if network opaque.
     if (!response.ok && entry.releaseState === "LIVE") {
       writePackageState(entry.experienceId, "FAILED");
       return "FAILED";
@@ -87,7 +93,6 @@ export async function preloadExperiencePackage(
     const state: LocalPackageState =
       entry.releaseState === "LIVE" ? "READY" : "READY_BUT_LOCKED";
     writePackageState(entry.experienceId, state);
-    // Cache shell metadata reference for offline activation.
     writeJson(`ox.package-meta.${entry.experienceId}`, {
       experienceId: entry.experienceId,
       packageVersion: entry.packageVersion,
@@ -97,7 +102,6 @@ export async function preloadExperiencePackage(
     });
     return state;
   } catch {
-    // Offline / CORS: still record locked-ready when preloaded so reveal can activate entrypoint.
     if (entry.releaseState === "PRELOADED" || entry.releaseState === "LOCKED") {
       writePackageState(entry.experienceId, "READY_BUT_LOCKED");
       return "READY_BUT_LOCKED";
@@ -109,14 +113,14 @@ export async function preloadExperiencePackage(
 
 export async function applyCatalogUpdate(
   catalog: SignedExperienceCatalog,
-  options?: { fetchImpl?: typeof fetch; secret?: string },
+  options?: { fetchImpl?: typeof fetch; publicKeySpki?: string },
 ): Promise<{
   ok: boolean;
   reason?: string;
   newlyLive: CatalogExperienceEntry[];
   preloadResults: Record<string, LocalPackageState>;
 }> {
-  const stored = await storeSignedCatalog(catalog, options?.secret ?? catalogVerifySecret());
+  const stored = await storeSignedCatalog(catalog, options?.publicKeySpki ?? catalogPublicKeySpki());
   if (!stored.ok) return { ok: false, reason: stored.reason, newlyLive: [], preloadResults: {} };
 
   const previous = readJson<{ seenLive?: string[] }>(REVEAL_BANNER_KEY) ?? { seenLive: [] };
@@ -133,7 +137,6 @@ export async function applyCatalogUpdate(
     }
     if (entry.releaseState === "LIVE" && isConsumerDiscoverable(entry.releaseState, entry.visibility)) {
       if (!seen.has(entry.experienceId)) newlyLive.push(entry);
-      // Promote locked package to READY on go-live
       const pkg = getPackageState(entry.experienceId);
       if (pkg === "READY_BUT_LOCKED") writePackageState(entry.experienceId, "READY");
     }

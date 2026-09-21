@@ -27,7 +27,7 @@
   --ox-space-md: 12px;
   --ox-space-lg: 18px;
   --ox-space-xl: 28px;
-  --ox-nav-h: 74px;
+  --ox-nav-h: 78px;
   --ox-safe-top: env(safe-area-inset-top, 0px);
   --ox-safe-bottom: env(safe-area-inset-bottom, 0px);
   --ox-safe-left: env(safe-area-inset-left, 0px);

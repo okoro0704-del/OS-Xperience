@@ -623,7 +623,9 @@ export {
   canLaunchByRelease,
   canPreloadByRelease,
   canonicalCatalogJson,
-  hmacSha256Hex,
+  generateCatalogSigningKeyPair,
+  importCatalogPublicKey,
+  importCatalogPrivateKey,
   signExperienceCatalog,
   verifyExperienceCatalog,
   assertCatalogReleaseIntegrity,
@@ -634,5 +636,20 @@ export {
   type CatalogExperienceEntry,
   type ExperienceCatalogPayload,
   type SignedExperienceCatalog,
+  type CatalogKeyPairExport,
 } from "./release.js";
+
+export {
+  PRESENTATION_STATUSES,
+  CHAPTER_ACTIONS,
+  normalizePresentationStatus,
+  normalizeChapterAction,
+  presentationStatusTransitionAllowed,
+  type PresentationStatus,
+  type ChapterAction,
+  type Presentation,
+  type PresentationChapter,
+  type PresentationView,
+  type PresentationAudienceState,
+} from "./presentation.js";
 

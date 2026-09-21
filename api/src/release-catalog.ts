@@ -13,6 +13,7 @@ import {
   type PreloadPolicy,
   type SignedExperienceCatalog,
 } from "@digiconomy/xperience-contract";
+import { getCatalogSigningKeys } from "./catalog-keys.js";
 import { DomainError, type Actor } from "./domain.js";
 
 export interface ReleaseChangeAudit {
@@ -29,13 +30,6 @@ export interface ReleaseChangeAudit {
 }
 
 type CatalogListener = (manifestVersion: number) => void;
-
-function catalogSecret(): string {
-  return (
-    process.env.XPERIENCE_CATALOG_SIGNING_SECRET?.trim() ||
-    "xperience-dev-catalog-hmac-not-for-production"
-  );
-}
 
 function seedEntries(): CatalogExperienceEntry[] {
   const now = new Date().toISOString();
@@ -118,7 +112,8 @@ export class ExperienceReleaseCatalog {
       expiresAt,
       experiences: this.listAdmin(),
     };
-    return signExperienceCatalog(payload, catalogSecret());
+    const keys = await getCatalogSigningKeys();
+    return signExperienceCatalog(payload, keys.privateKey);
   }
 
   /** Public consumer catalog — only discoverable LIVE Experiences. */
@@ -130,7 +125,8 @@ export class ExperienceReleaseCatalog {
         isConsumerDiscoverable(item.releaseState, item.visibility),
       ),
     };
-    return signExperienceCatalog(payload, catalogSecret());
+    const keys = await getCatalogSigningKeys();
+    return signExperienceCatalog(payload, keys.privateKey);
   }
 
   /** Full catalog for preload clients (includes PRELOADED/LOCKED, excludes DRAFT). */
@@ -138,20 +134,14 @@ export class ExperienceReleaseCatalog {
     const full = await this.buildSignedCatalog();
     const payload: ExperienceCatalogPayload = {
       ...full.payload,
-      experiences: full.payload.experiences.filter(
-        (item) =>
-          item.releaseState !== "DRAFT" &&
-          item.releaseState !== "RETIRED" &&
-          (item.releaseState !== "PRIVATE_TEST" || true),
-      ),
+      experiences: full.payload.experiences.filter((item) => {
+        if (item.releaseState === "DRAFT" || item.releaseState === "RETIRED") return false;
+        if (item.releaseState === "PRIVATE_TEST") return false;
+        return true;
+      }),
     };
-    // PRIVATE_TEST stays in device catalog only when marked — for X3 keep out of public consumer list.
-    payload.experiences = full.payload.experiences.filter((item) => {
-      if (item.releaseState === "DRAFT" || item.releaseState === "RETIRED") return false;
-      if (item.releaseState === "PRIVATE_TEST") return false;
-      return true;
-    });
-    return signExperienceCatalog(payload, catalogSecret());
+    const keys = await getCatalogSigningKeys();
+    return signExperienceCatalog(payload, keys.privateKey);
   }
 
   upsertDraft(entry: Omit<CatalogExperienceEntry, "updatedAt" | "releaseState" | "visibility" | "preloadPolicy"> & {
@@ -264,10 +254,6 @@ export class ExperienceReleaseCatalog {
 
   preloadTargets(): CatalogExperienceEntry[] {
     return this.listAdmin().filter((item) => canPreloadByRelease(item.releaseState));
-  }
-
-  signingSecretForTests(): string {
-    return catalogSecret();
   }
 }
 

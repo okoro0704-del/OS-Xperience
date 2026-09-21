@@ -108,9 +108,9 @@ export interface ExperienceCatalogPayload {
 
 export interface SignedExperienceCatalog {
   payload: ExperienceCatalogPayload;
-  /** Hex HMAC-SHA256 over canonical JSON of payload. */
+  /** Base64 Ed25519 signature over canonical JSON of payload. */
   signature: string;
-  algorithm: "HMAC-SHA256";
+  algorithm: "Ed25519";
 }
 
 /** Deterministic JSON for signing — sorted object keys, no whitespace variance. */
@@ -130,43 +130,98 @@ function sortKeys(value: unknown): unknown {
   return value;
 }
 
-export async function hmacSha256Hex(secret: string, message: string): Promise<string> {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
+function bytesToBase64(bytes: ArrayBuffer | Uint8Array): string {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = "";
+  for (let i = 0; i < view.length; i += 1) binary += String.fromCharCode(view[i]!);
+  return btoa(binary);
+}
+
+function base64ToBytes(value: string): Uint8Array {
+  const binary = atob(value);
+  const out = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) out[i] = binary.charCodeAt(i);
+  return out;
+}
+
+function asBufferSource(bytes: Uint8Array): BufferSource {
+  return bytes as BufferSource;
+}
+
+export interface CatalogKeyPairExport {
+  publicKeySpkiBase64: string;
+  privateKeyPkcs8Base64: string;
+}
+
+/** Generate an Ed25519 key pair. Private key must stay on the server only. */
+export async function generateCatalogSigningKeyPair(): Promise<
+  CatalogKeyPairExport & { publicKey: CryptoKey; privateKey: CryptoKey }
+> {
+  const pair = (await crypto.subtle.generateKey("Ed25519" as AlgorithmIdentifier, true, [
+    "sign",
+    "verify",
+  ])) as CryptoKeyPair;
+  const spki = await crypto.subtle.exportKey("spki", pair.publicKey);
+  const pkcs8 = await crypto.subtle.exportKey("pkcs8", pair.privateKey);
+  return {
+    publicKey: pair.publicKey,
+    privateKey: pair.privateKey,
+    publicKeySpkiBase64: bytesToBase64(spki),
+    privateKeyPkcs8Base64: bytesToBase64(pkcs8),
+  };
+}
+
+export async function importCatalogPublicKey(spkiBase64: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "spki",
+    asBufferSource(base64ToBytes(spkiBase64)),
+    "Ed25519" as AlgorithmIdentifier,
+    true,
+    ["verify"],
+  );
+}
+
+export async function importCatalogPrivateKey(pkcs8Base64: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "pkcs8",
+    asBufferSource(base64ToBytes(pkcs8Base64)),
+    "Ed25519" as AlgorithmIdentifier,
     false,
     ["sign"],
   );
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export async function signExperienceCatalog(
   payload: ExperienceCatalogPayload,
-  secret: string,
+  privateKey: CryptoKey | string,
 ): Promise<SignedExperienceCatalog> {
-  const signature = await hmacSha256Hex(secret, canonicalCatalogJson(payload));
-  return { payload, signature, algorithm: "HMAC-SHA256" };
+  const key =
+    typeof privateKey === "string" ? await importCatalogPrivateKey(privateKey) : privateKey;
+  const data = new TextEncoder().encode(canonicalCatalogJson(payload));
+  const signature = await crypto.subtle.sign("Ed25519" as AlgorithmIdentifier, key, data);
+  return { payload, signature: bytesToBase64(signature), algorithm: "Ed25519" };
 }
 
 export async function verifyExperienceCatalog(
   catalog: SignedExperienceCatalog,
-  secret: string,
+  publicKey: CryptoKey | string,
 ): Promise<boolean> {
-  if (catalog.algorithm !== "HMAC-SHA256") return false;
+  if (catalog.algorithm !== "Ed25519") return false;
   if (!catalog.payload || !Array.isArray(catalog.payload.experiences)) return false;
   if (Date.parse(catalog.payload.expiresAt) < Date.now()) return false;
-  const expected = await hmacSha256Hex(secret, canonicalCatalogJson(catalog.payload));
-  return timingSafeEqualHex(expected, catalog.signature);
-}
-
-function timingSafeEqualHex(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let mismatch = 0;
-  for (let i = 0; i < a.length; i += 1) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return mismatch === 0;
+  try {
+    const key =
+      typeof publicKey === "string" ? await importCatalogPublicKey(publicKey) : publicKey;
+    const data = new TextEncoder().encode(canonicalCatalogJson(catalog.payload));
+    return await crypto.subtle.verify(
+      "Ed25519" as AlgorithmIdentifier,
+      key,
+      asBufferSource(base64ToBytes(catalog.signature)),
+      data,
+    );
+  } catch {
+    return false;
+  }
 }
 
 /** Reject unsigned local mutations that try to promote LOCKED → LIVE. */

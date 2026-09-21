@@ -88,7 +88,7 @@ export {
   CATALOG_KEY,
   applyCatalogUpdate,
   catalogEntryLaunchable,
-  catalogVerifySecret,
+  catalogPublicKeySpki,
   filterDiscoverableCatalog,
   getPackageState,
   localReleaseClaimAllowed,
@@ -96,6 +96,7 @@ export {
   preloadExperiencePackage,
   readPackageStates,
   readSignedCatalog,
+  storeCatalogPublicKey,
   storeSignedCatalog,
   writePackageState,
 } from "./catalog.js";

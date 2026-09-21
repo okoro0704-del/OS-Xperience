@@ -19,6 +19,7 @@ import {
   buildLineup,
   buildLocalOpenPayload,
   canOperateOffline,
+  catalogPublicKeySpki,
   enterXperienceMode,
   leaveXperienceMode,
   markRevealSeen,
@@ -27,6 +28,7 @@ import {
   previousExperienceId,
   rememberOpenedExperience,
   shellAuthPosture,
+  storeCatalogPublicKey,
   type LineupEntry,
 } from "./local/index.js";
 import { ExperienceSwitcher, attachDoubleTap } from "./switcher/index.js";
@@ -116,11 +118,27 @@ function initials(value: string): string {
   );
 }
 
-function Icon({ name }: { name: "home" | "directory" | "voice" | "experience" | "profile" | "search" | "bell" | "back" | "more" | "view" }) {
+function Icon({
+  name,
+}: {
+  name:
+    | "home"
+    | "directory"
+    | "voice"
+    | "xperience"
+    | "experience"
+    | "profile"
+    | "search"
+    | "bell"
+    | "back"
+    | "more"
+    | "view";
+}) {
   const paths = {
     home: <><path d="m3 11 9-8 9 8" /><path d="M5 10v10h14V10M9 20v-6h6v6" /></>,
     directory: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><rect x="14" y="14" width="7" height="7" rx="2" /></>,
     voice: <><rect x="9" y="3" width="6" height="12" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3M8 21h8" /></>,
+    xperience: <><path d="M12 3 13.8 9.2 20 11l-6.2 1.8L12 19l-1.8-6.2L4 11l6.2-1.8z" /><circle cx="12" cy="11" r="1.6" fill="currentColor" /></>,
     experience: <><path d="M4 5h16v14H4z" /><path d="m8 9 3 3-3 3M13 15h3" /></>,
     profile: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></>,
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-4-4" /></>,
@@ -197,14 +215,89 @@ function AppCard({
   </article>;
 }
 
-function BottomNav({ screen, go }: { screen: Screen; go: (screen: Screen) => void }) {
-  return <nav className="ox-bottom-nav" aria-label="Primary navigation">
-    <button data-testid="nav-home" className={screen === "home" ? "active" : ""} onClick={() => go("home")}><Icon name="home" /><span>Home</span></button>
-    <button data-testid="nav-directory" className={screen === "directory" ? "active" : ""} onClick={() => go("directory")}><Icon name="directory" /><span>Directory</span></button>
-    <button data-testid="nav-voice" className="ox-mobile-mic" onClick={() => go("voice")} aria-label="Voice"><span><Icon name="voice" /></span><small>Voice</small></button>
-    <button data-testid="nav-my-experience" className={screen === "my-experience" ? "active" : ""} onClick={() => go("my-experience")}><Icon name="experience" /><span>My Xperience</span></button>
-    <button className={screen === "profile" ? "active" : ""} onClick={() => go("profile")}><Icon name="profile" /><span>Profile</span></button>
-  </nav>;
+function BottomNav({
+  screen,
+  go,
+  onEnterXperience,
+}: {
+  screen: Screen;
+  go: (screen: Screen) => void;
+  onEnterXperience: () => void;
+}) {
+  const runtimeMode = screen === "voice" ? "voice" : screen === "experience" ? "xperience" : null;
+  return (
+    <nav className="ox-bottom-nav" aria-label="Primary navigation">
+      <button
+        type="button"
+        data-testid="nav-home"
+        className={`ox-nav-dest${screen === "home" ? " active" : ""}`}
+        onClick={() => go("home")}
+      >
+        <Icon name="home" />
+        <span>Home</span>
+      </button>
+      <button
+        type="button"
+        data-testid="nav-directory"
+        className={`ox-nav-dest${screen === "directory" || screen === "search" || screen === "detail" ? " active" : ""}`}
+        onClick={() => go("directory")}
+      >
+        <Icon name="directory" />
+        <span>Directory</span>
+      </button>
+
+      <div
+        className={`ox-mode-switch${runtimeMode ? " has-mode" : ""}`}
+        role="group"
+        aria-label="Xperience Voice mode switch"
+        data-testid="nav-mode-switch"
+        data-mode={runtimeMode ?? "idle"}
+      >
+        <button
+          type="button"
+          data-testid="nav-xperience"
+          className={runtimeMode === "xperience" ? "is-active" : ""}
+          aria-pressed={runtimeMode === "xperience"}
+          onClick={onEnterXperience}
+        >
+          <Icon name="xperience" />
+          <span>Xperience</span>
+        </button>
+        <span className="ox-mode-switch-divider" aria-hidden="true">
+          ⇄
+        </span>
+        <button
+          type="button"
+          data-testid="nav-voice"
+          className={runtimeMode === "voice" ? "is-active" : ""}
+          aria-pressed={runtimeMode === "voice"}
+          onClick={() => go("voice")}
+        >
+          <Icon name="voice" />
+          <span>Voice</span>
+        </button>
+      </div>
+
+      <button
+        type="button"
+        data-testid="nav-my-experience"
+        className={`ox-nav-dest${screen === "my-experience" ? " active" : ""}`}
+        onClick={() => go("my-experience")}
+      >
+        <Icon name="experience" />
+        <span>My Experience</span>
+      </button>
+      <button
+        type="button"
+        data-testid="nav-profile"
+        className={`ox-nav-dest${screen === "profile" ? " active" : ""}`}
+        onClick={() => go("profile")}
+      >
+        <Icon name="profile" />
+        <span>Profile</span>
+      </button>
+    </nav>
+  );
 }
 
 export function ExperienceApp(props: ExperienceAppProps) {
@@ -500,14 +593,20 @@ export function ExperienceApp(props: ExperienceAppProps) {
       }
 
       try {
-        const [directoryResult, featuredResult, membershipResult, catalog] = await Promise.all([
+        const [directoryResult, featuredResult, membershipResult, catalog, publicKey] = await Promise.all([
           api.listDirectory(),
           api.featuredDirectory(),
           api.listMyExperience(),
           api.getCatalogManifest().catch(() => null),
+          api.getCatalogPublicKey().catch(() => null),
         ]);
+        if (publicKey?.publicKeySpkiBase64) {
+          storeCatalogPublicKey(publicKey.publicKeySpkiBase64);
+        }
         if (catalog) {
-          const applied = await applyCatalogUpdate(catalog);
+          const applied = await applyCatalogUpdate(catalog, {
+            publicKeySpki: publicKey?.publicKeySpkiBase64 ?? catalogPublicKeySpki() ?? undefined,
+          });
           if (applied.ok && applied.newlyLive[0]) {
             const first = applied.newlyLive[0];
             setRevealBanner({ id: first.experienceId, name: first.name });
@@ -552,20 +651,30 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
   useEffect(() => {
     const poll = () => {
-      void api
-        .getCatalogManifest()
-        .then(async (catalog) => {
-          const applied = await applyCatalogUpdate(catalog);
+      void (async () => {
+        try {
+          let publicKeySpki = catalogPublicKeySpki();
+          if (!publicKeySpki) {
+            const key = await api.getCatalogPublicKey();
+            storeCatalogPublicKey(key.publicKeySpkiBase64);
+            publicKeySpki = key.publicKeySpkiBase64;
+          }
+          // Presentation pointer is informative only — never auto-enters an Experience (X4).
+          await api.getActivePresentation().catch(() => null);
+          const catalog = await api.getCatalogManifest();
+          const applied = await applyCatalogUpdate(catalog, { publicKeySpki });
           if (applied.ok && applied.newlyLive[0]) {
             setRevealBanner({
               id: applied.newlyLive[0].experienceId,
               name: applied.newlyLive[0].name,
             });
           }
-        })
-        .catch(() => undefined);
+        } catch {
+          /* soft poll failure — offline catalog continuity remains */
+        }
+      })();
     };
-    const timer = window.setInterval(poll, 45_000);
+    const timer = window.setInterval(poll, 20_000);
     return () => window.clearInterval(timer);
   }, [api]);
 
@@ -1139,6 +1248,23 @@ export function ExperienceApp(props: ExperienceAppProps) {
     .slice(0, 4);
   const forYouItems = featured.slice(0, 4);
 
+  const enterXperienceFromNav = () => {
+    const lineupId = activeExperienceId ?? lineup[0]?.experienceId;
+    const fromLineup = lineupId
+      ? directory.find((app) => app.id === lineupId)
+        ?? memberships.find((item) => item.applicationId === lineupId)?.application
+        ?? continueItems.find((item) => item.applicationId === lineupId)?.application
+      : undefined;
+    const resume = fromLineup
+      ?? continueItems[0]?.application
+      ?? memberships[0]?.application;
+    if (resume) {
+      void (resume.experienced ? openApplication(resume, "PUBLIC") : startApplication(resume));
+      return;
+    }
+    navigate("my-experience");
+  };
+
   const renderGrid = (apps: DirectoryApplicationView[], options?: { home?: boolean; dense?: boolean }) => loading
     ? <Skeletons count={options?.home ? 4 : 6} home={options?.home} />
     : apps.length === 0
@@ -1566,7 +1692,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
       ) : null}
     </main>
 
-    {!isDesktop && screen !== "experience" ? <BottomNav screen={screen} go={navigate} /> : null}
+    {!isDesktop && screen !== "experience" ? (
+      <BottomNav screen={screen} go={navigate} onEnterXperience={enterXperienceFromNav} />
+    ) : null}
     {stopTarget ? <div className="ox-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setStopTarget(null); }}>
       <section data-testid="stop-modal" className="ox-modal" role="dialog" aria-modal="true" aria-labelledby="stop-title"><span className="ox-modal-icon">◇</span><h2 id="stop-title">Unxperience {stopTarget.application.name}?</h2><p>This removes it from My Xperience. You can add it again from Directory at any time.</p><div><button className="ox-button secondary" onClick={() => setStopTarget(null)}>Cancel</button><button data-testid="confirm-stop" className="ox-button danger" disabled={busyId === stopTarget.applicationId} onClick={() => void confirmStop()}>Unxperience</button></div></section>
     </div> : null}

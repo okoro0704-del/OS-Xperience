@@ -15,24 +15,32 @@ import {
   resetReleaseCatalogForTests,
 } from "../../../api/src/release-catalog.js";
 import {
+  exportGeneratedCatalogKeysForTests,
+  resetCatalogSigningKeysForTests,
+} from "../../../api/src/catalog-keys.js";
+import {
   applyCatalogUpdate,
   clearMemoryKvStore,
   localReleaseClaimAllowed,
   memoryKvStore,
   setKvStoreForTests,
   getPackageState,
+  storeCatalogPublicKey,
 } from "../src/local/index.js";
 
-const SECRET = "xperience-dev-catalog-hmac-not-for-production";
-
-function reset() {
+async function reset() {
   clearMemoryKvStore();
   setKvStoreForTests(memoryKvStore);
+  resetCatalogSigningKeysForTests();
   resetReleaseCatalogForTests();
-  process.env.XPERIENCE_CATALOG_SIGNING_SECRET = SECRET;
+  const keys = await exportGeneratedCatalogKeysForTests();
+  storeCatalogPublicKey(keys.publicKeySpkiBase64);
+  return keys;
 }
 
-test.beforeEach(() => reset());
+test.beforeEach(async () => {
+  await reset();
+});
 
 test("release transition graph allows PRELOADED → LIVE", () => {
   assert.equal(releaseTransitionAllowed("PRELOADED", "LIVE"), true);
@@ -48,13 +56,14 @@ test("release state is separate from authMode semantics", () => {
   assert.equal(isConsumerDiscoverable("LIVE", "FEATURED"), true);
 });
 
-test("signed catalog verifies and rejects tampering", async () => {
+test("Ed25519 signed catalog verifies and rejects tampering", async () => {
+  const keys = await reset();
   const catalog = new ExperienceReleaseCatalog(true);
   const signed = await catalog.buildDeviceSignedCatalog();
-  assert.equal(await verifyExperienceCatalog(signed, SECRET), true);
+  assert.equal(await verifyExperienceCatalog(signed, keys.publicKeySpkiBase64), true);
   const tampered = structuredClone(signed);
   tampered.payload.experiences[0]!.releaseState = "LIVE";
-  assert.equal(await verifyExperienceCatalog(tampered, SECRET), false);
+  assert.equal(await verifyExperienceCatalog(tampered, keys.publicKeySpkiBase64), false);
 });
 
 test("admin go-live requires confirmation and writes audit", () => {
@@ -72,21 +81,26 @@ test("admin go-live requires confirmation and writes audit", () => {
 });
 
 test("client rejects local LOCKED → LIVE without signed catalog", async () => {
+  const keys = await reset();
   const catalog = resetReleaseCatalogForTests();
   const signed = await catalog.buildDeviceSignedCatalog();
-  await applyCatalogUpdate(signed, { secret: SECRET, fetchImpl: async () => new Response("ok") });
+  await applyCatalogUpdate(signed, {
+    publicKeySpki: keys.publicKeySpkiBase64,
+    fetchImpl: async () => new Response("ok"),
+  });
   assert.equal(localReleaseClaimAllowed("lifeos", "PRELOADED"), true);
   assert.equal(localReleaseClaimAllowed("lifeos", "LIVE"), false);
   assert.equal(assertCatalogReleaseIntegrity(signed, "lifeos", "PRELOADED"), true);
 });
 
 test("preload marks READY_BUT_LOCKED then LIVE promotes READY", async () => {
+  const keys = await reset();
   const catalog = resetReleaseCatalogForTests();
   const signed = await catalog.buildDeviceSignedCatalog();
   const lifeos = signed.payload.experiences.find((e) => e.experienceId === "lifeos")!;
   assert.equal(lifeos.releaseState, "PRELOADED");
   const applied = await applyCatalogUpdate(signed, {
-    secret: SECRET,
+    publicKeySpki: keys.publicKeySpkiBase64,
     fetchImpl: async () => new Response("package-bytes", { status: 200 }),
   });
   assert.equal(applied.ok, true);
@@ -96,7 +110,7 @@ test("preload marks READY_BUT_LOCKED then LIVE promotes READY", async () => {
   catalog.goLive(actor, "lifeos", "FEATURED");
   const next = await catalog.buildDeviceSignedCatalog();
   const appliedLive = await applyCatalogUpdate(next, {
-    secret: SECRET,
+    publicKeySpki: keys.publicKeySpkiBase64,
     fetchImpl: async () => new Response("package-bytes", { status: 200 }),
   });
   assert.equal(appliedLive.ok, true);
@@ -105,20 +119,27 @@ test("preload marks READY_BUT_LOCKED then LIVE promotes READY", async () => {
 });
 
 test("offline keeps last valid signed manifest", async () => {
+  const keys = await reset();
   const catalog = resetReleaseCatalogForTests();
   const signed = await catalog.buildDeviceSignedCatalog();
-  await applyCatalogUpdate(signed, { secret: SECRET, fetchImpl: async () => new Response("ok") });
+  await applyCatalogUpdate(signed, {
+    publicKeySpki: keys.publicKeySpkiBase64,
+    fetchImpl: async () => new Response("ok"),
+  });
   assert.equal(localReleaseClaimAllowed("bootstrap.mybrandos.public", "LIVE"), true);
 });
 
-test("canonical payload signs stably", async () => {
+test("canonical payload signs stably with Ed25519 private key", async () => {
+  const keys = await reset();
   const payload: ExperienceCatalogPayload = {
     manifestVersion: 1,
     generatedAt: "2026-01-01T00:00:00.000Z",
     expiresAt: "2099-01-01T00:00:00.000Z",
     experiences: [],
   };
-  const a = await signExperienceCatalog(payload, SECRET);
-  const b = await signExperienceCatalog(payload, SECRET);
+  const a = await signExperienceCatalog(payload, keys.privateKeyPkcs8Base64);
+  const b = await signExperienceCatalog(payload, keys.privateKeyPkcs8Base64);
   assert.equal(a.signature, b.signature);
+  assert.equal(a.algorithm, "Ed25519");
+  assert.equal(await verifyExperienceCatalog(a, keys.publicKeySpkiBase64), true);
 });

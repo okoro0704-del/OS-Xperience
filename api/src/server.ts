@@ -227,13 +227,40 @@ async function route(
 
   // Phase X3 — signed catalog + admin release control + SSE notify
   if (req.method === "GET" && path === "/v1/catalog/manifest") {
-    // Device catalog (includes PRELOADED) — no auth required for download integrity blob;
-    // release promotion still requires admin. Local edits without signature are rejected client-side.
+    // Device catalog (includes PRELOADED) — signature is Ed25519; public key via /v1/catalog/public-key.
     return send(res, 200, await service.getDeviceCatalog(actor));
+  }
+
+  if (req.method === "GET" && path === "/v1/catalog/public-key") {
+    return send(res, 200, await service.getCatalogPublicKey());
   }
 
   if (req.method === "GET" && path === "/v1/catalog/consumer") {
     return send(res, 200, await service.getConsumerCatalog(actor));
+  }
+
+  if (req.method === "GET" && path === "/v1/presentation/active") {
+    return send(res, 200, service.audiencePresentationState(actor));
+  }
+
+  if (req.method === "GET" && path === "/v1/admin/presentations") {
+    return send(res, 200, service.listPresentations(actor));
+  }
+
+  if (req.method === "POST" && path === "/v1/admin/presentations") {
+    return send(res, 201, await service.createPresentation(actor, (await readBody(req)) as never));
+  }
+
+  const presentationMatch = path.match(
+    /^\/v1\/admin\/presentations\/([^/]+)(?:\/(ready|start|pause|resume|end|next|previous|reveal-current|select-chapter))?$/,
+  );
+  if (presentationMatch) {
+    const [, id, action] = presentationMatch;
+    if (req.method === "GET" && !action) return send(res, 200, service.getPresentation(actor, id));
+    if (req.method === "POST" && action) {
+      const body = (await readBody(req)) as { chapterId?: string; confirm?: boolean };
+      return send(res, 200, service.presentationAction(actor, id, action as never, body));
+    }
   }
 
   if (req.method === "GET" && path === "/v1/catalog/events") {

@@ -175,10 +175,17 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
         "GET",
         "/v1/catalog/manifest",
       ),
+    getCatalogPublicKey: () =>
+      request<{ algorithm: "Ed25519"; publicKeySpkiBase64: string }>("GET", "/v1/catalog/public-key"),
     getConsumerCatalog: () =>
       request<import("@digiconomy/xperience-contract").SignedExperienceCatalog>(
         "GET",
         "/v1/catalog/consumer",
+      ),
+    getActivePresentation: () =>
+      request<{ presentation: import("@digiconomy/xperience-contract").PresentationAudienceState | null }>(
+        "GET",
+        "/v1/presentation/active",
       ),
     listReleases: () =>
       request<{
@@ -195,6 +202,51 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
         experience: import("@digiconomy/xperience-contract").CatalogExperienceEntry;
         catalog: import("@digiconomy/xperience-contract").SignedExperienceCatalog;
       }>("POST", `/v1/admin/releases/${encodeURIComponent(id)}/${action}`, body ?? {}),
+    listPresentations: () =>
+      request<{ presentations: import("@digiconomy/xperience-contract").PresentationView[] }>(
+        "GET",
+        "/v1/admin/presentations",
+      ),
+    getPresentation: (id: string) =>
+      request<import("@digiconomy/xperience-contract").PresentationView>(
+        "GET",
+        `/v1/admin/presentations/${encodeURIComponent(id)}`,
+      ),
+    createPresentation: (body: {
+      title: string;
+      chapters: Array<{
+        title: string;
+        experienceId: string;
+        action?: string;
+        visibility?: string;
+        notes?: string;
+      }>;
+      skipRevealConfirm?: boolean;
+    }) =>
+      request<import("@digiconomy/xperience-contract").PresentationView>(
+        "POST",
+        "/v1/admin/presentations",
+        body,
+      ),
+    presentationAction: (
+      id: string,
+      action:
+        | "ready"
+        | "start"
+        | "pause"
+        | "resume"
+        | "end"
+        | "next"
+        | "previous"
+        | "reveal-current"
+        | "select-chapter",
+      body?: { chapterId?: string; confirm?: boolean },
+    ) =>
+      request<{
+        presentation: import("@digiconomy/xperience-contract").PresentationView;
+        experienceId?: string;
+        releaseState?: string;
+      }>("POST", `/v1/admin/presentations/${encodeURIComponent(id)}/${action}`, body ?? {}),
   };
 }
 
