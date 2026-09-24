@@ -2,7 +2,7 @@ import type { XperienceInstallation } from "@digiconomy/xperience-contract";
 import { readJson, writeJson } from "./storage.js";
 
 export const INSTALLATION_KEY = "ox.installation.v1";
-export const RUNTIME_VERSION = "x3.0.0";
+export const RUNTIME_VERSION = "2026.09.21.2";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {

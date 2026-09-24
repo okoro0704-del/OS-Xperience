@@ -92,6 +92,7 @@ export {
   nextExperienceId,
   planSwitch,
   previousExperienceId,
+  probeExperienceUrl,
   readInstallation,
   readLastExperience,
   readRuntimeMode,

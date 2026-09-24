@@ -84,6 +84,7 @@ export {
   switchingPreservesAuthIsolation,
   type SwitchPlan,
 } from "./runtime.js";
+export { probeExperienceUrl } from "./probe.js";
 export {
   CATALOG_KEY,
   applyCatalogUpdate,

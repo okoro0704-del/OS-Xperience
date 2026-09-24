@@ -3,19 +3,17 @@ import type { CapacitorConfig } from "@capacitor/cli";
 /**
  * OS Experience native shells — Android + iOS from the SAME web build.
  *
- * LIVE OTA (default): WebView loads https://os-xperience.netlify.app on every
- * launch. Deploy UI to Netlify → users get the new Experience automatically —
- * no new APK install for product/UI changes.
+ * RELEASE / DEFAULT: bundled `webDir` only (X1 offline startup).
+ * The APK must boot from local assets — never require Netlify/Railway to paint UI.
  *
- * Offline/bundled-only builds (Phase X1 style):
- *   OX_BUNDLED_ONLY=1
- * Custom live host:
+ * Optional live WebView (debug / special OTA shells ONLY):
+ *   OX_LIVE_OTA=1
  *   CAPACITOR_SERVER_URL=https://…
  */
-const bundledOnly = process.env.OX_BUNDLED_ONLY === "1";
-const liveUrl = bundledOnly
-  ? ""
-  : (process.env.CAPACITOR_SERVER_URL || process.env.OX_LIVE_URL || "https://os-xperience.netlify.app").trim();
+const liveOta = process.env.OX_LIVE_OTA === "1";
+const liveUrl = liveOta
+  ? (process.env.CAPACITOR_SERVER_URL || process.env.OX_LIVE_URL || "").trim()
+  : "";
 
 const config: CapacitorConfig = {
   appId: "com.digiconomy.osexperience",
@@ -43,8 +41,8 @@ const config: CapacitorConfig = {
   },
   plugins: {
     SplashScreen: {
-      launchShowDuration: 1200,
-      launchAutoHide: false,
+      launchShowDuration: 400,
+      launchAutoHide: true,
       backgroundColor: "#05070f",
       showSpinner: false,
     },

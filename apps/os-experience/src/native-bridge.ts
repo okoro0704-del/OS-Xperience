@@ -57,11 +57,14 @@ export async function attachNativeShellBridge(handlers: {
 
   try {
     const { StatusBar, Style } = await import("@capacitor/status-bar");
+    await new Promise<void>((resolve) => {
+      window.requestAnimationFrame(() => resolve());
+    });
     await StatusBar.setOverlaysWebView({ overlay: true });
     await StatusBar.setStyle({ style: Style.Dark });
     try {
       const info = await StatusBar.getInfo();
-      if (typeof info.height === "number" && info.height > 0) {
+      if (typeof info.height === "number" && info.height > 0 && document.documentElement?.style) {
         const currentBottom =
           Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--ox-safe-bottom")) || 0;
         applySystemInsets({

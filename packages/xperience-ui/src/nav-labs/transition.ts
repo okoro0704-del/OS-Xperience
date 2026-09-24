@@ -10,9 +10,10 @@ const TRANSFORM_PROP = "--ox-nav-labs-transform";
 const PROGRESS_PROP = "--ox-nav-labs-progress";
 
 export function applyExperienceTransform(
-  el: HTMLElement,
+  el: HTMLElement | null | undefined,
   opts: ExperienceTransform,
 ): void {
+  if (!el) return;
   const x = opts.x ?? 0;
   const y = opts.y ?? 0;
   const scale = opts.scale ?? 1;
@@ -23,7 +24,8 @@ export function applyExperienceTransform(
   el.style.willChange = "transform";
 }
 
-export function clearExperienceTransform(el: HTMLElement): void {
+export function clearExperienceTransform(el: HTMLElement | null | undefined): void {
+  if (!el) return;
   el.style.removeProperty(TRANSFORM_PROP);
   el.style.removeProperty(PROGRESS_PROP);
   el.style.transform = "";

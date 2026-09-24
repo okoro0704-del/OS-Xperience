@@ -653,3 +653,13 @@ export {
   type PresentationAudienceState,
 } from "./presentation.js";
 
+export {
+  compareDottedVersion,
+  decideOxUpdate,
+  isOxUpdateManifest,
+  type OxUpdateManifest,
+  type OxUpdateKind,
+  type OxUpdateDecision,
+  type OxInstalledVersions,
+} from "./update.js";
+

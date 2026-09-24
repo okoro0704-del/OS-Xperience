@@ -1,0 +1,11 @@
+{
+  "nativeVersion": "0.3.4",
+  "nativeBuildNumber": 12,
+  "runtimeVersion": "2026.09.21.3",
+  "minimumRuntimeVersion": "2026.09.01.0",
+  "minimumNativeVersion": "0.3.0",
+  "minimumNativeBuildNumber": 8,
+  "apkUrl": "",
+  "runtimeUrl": "https://xperience.getlifeos.app",
+  "notes": "Bundled boot + safe Experience restore fallback (no white WebView error)"
+}

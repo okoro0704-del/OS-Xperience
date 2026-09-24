@@ -66,6 +66,7 @@ export function detectOxPlatformId(): OxPlatformId {
 export function applySharedSystemInsets(insets: SystemInsets): void {
   if (typeof document === "undefined") return;
   const root = document.documentElement;
+  if (!root?.style) return;
   root.style.setProperty("--ox-safe-top", `${Math.max(0, insets.top)}px`);
   root.style.setProperty("--ox-safe-bottom", `${Math.max(0, insets.bottom)}px`);
   root.style.setProperty("--ox-safe-left", `${Math.max(0, insets.left)}px`);

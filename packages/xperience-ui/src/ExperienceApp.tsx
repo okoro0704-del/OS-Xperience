@@ -26,6 +26,7 @@ import {
   nextExperienceId,
   planSwitch,
   previousExperienceId,
+  probeExperienceUrl,
   rememberOpenedExperience,
   shellAuthPosture,
   storeCatalogPublicKey,
@@ -353,6 +354,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [isDesktop, setIsDesktop] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 960px)").matches);
   const [offline, setOffline] = useState(false);
   const [experienceOfflineMessage, setExperienceOfflineMessage] = useState<string | null>(null);
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const [lineup, setLineup] = useState<LineupEntry[]>([]);
   const [activeExperienceId, setActiveExperienceId] = useState<string | null>(null);
@@ -360,6 +362,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     { id: string; embedUrl: string; name: string }[]
   >([]);
   const [revealBanner, setRevealBanner] = useState<{ id: string; name: string } | null>(null);
+  const bootRestoreDoneRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const immersiveRef = useRef<HTMLDivElement | null>(null);
   const switcherEdgeLeftRef = useRef<HTMLDivElement | null>(null);
@@ -418,6 +421,30 @@ export function ExperienceApp(props: ExperienceAppProps) {
     setSwitcherOpen(true);
     bumpSwitcherIdle();
   }, [bumpSwitcherIdle]);
+
+  const abortExperienceToHome = useCallback(
+    (message: string) => {
+      leaveXperienceMode();
+      setMountedFrames([]);
+      setOpened(null);
+      setLaunchingApp(null);
+      setFrameFailed(false);
+      setFrameReady(false);
+      setExperienceOfflineMessage(null);
+      setActiveExperienceId(null);
+      setSwitcherOpen(false);
+      setRestoreNotice(message);
+      navigate("home", { replace: true });
+    },
+    [navigate],
+  );
+
+  const ensureEntrypointReachable = useCallback(async (url: string | null | undefined) => {
+    if (!url) {
+      return { ok: false as const, reason: "Experience entrypoint is missing." };
+    }
+    return probeExperienceUrl(url, 2500);
+  }, []);
 
   const applyMountPlan = useCallback(
     (
@@ -523,10 +550,22 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const switchToExperience = useCallback(
     (experienceId: string) => {
       const nextLineup = refreshLineup();
-      applyMountPlan(nextLineup, experienceId, activeIdRef.current);
-      dismissSwitcher();
+      void (async () => {
+        if (!mountedIdsRef.current.includes(experienceId)) {
+          const entry = nextLineup.find((item) => item.experienceId === experienceId);
+          const probe = await ensureEntrypointReachable(entry?.entrypoint);
+          if (!probe.ok) {
+            abortExperienceToHome(
+              probe.reason ?? "OS Xperience could not open that Experience. Returning Home.",
+            );
+            return;
+          }
+        }
+        applyMountPlan(nextLineup, experienceId, activeIdRef.current);
+        dismissSwitcher();
+      })();
     },
-    [applyMountPlan, dismissSwitcher, refreshLineup],
+    [abortExperienceToHome, applyMountPlan, dismissSwitcher, ensureEntrypointReachable, refreshLineup],
   );
 
   const switchNext = useCallback(() => {
@@ -569,24 +608,59 @@ export function ExperienceApp(props: ExperienceAppProps) {
       });
       setError(null);
 
-      if (local.restore) {
-        const nextLineup = buildLineup({
-          online: isOnline,
-          membershipIds: local.memberships.map((item) => item.applicationId),
-          apps: local.directory,
-        });
-        setLineup(nextLineup);
-        setExperienceOfflineMessage(local.restore.offlineBlocked ? (local.restore.offlineMessage ?? null) : null);
-        setLaunchingApp(local.restore.app);
-        if (local.restore.payload && !local.restore.offlineBlocked) {
-          applyMountPlan(nextLineup, local.restore.app.id, null, { app: local.restore.app });
-        } else if (local.restore.offlineBlocked) {
-          applyMountPlan(nextLineup, local.restore.app.id, null, {
-            app: local.restore.app,
-            offlineMessage: local.restore.offlineMessage,
+      if (local.restore && !bootRestoreDoneRef.current) {
+        bootRestoreDoneRef.current = true;
+        try {
+          const nextLineup = buildLineup({
+            online: isOnline,
+            membershipIds: local.memberships.map((item) => item.applicationId),
+            apps: local.directory,
           });
+          setLineup(nextLineup);
+          setExperienceOfflineMessage(local.restore.offlineBlocked ? (local.restore.offlineMessage ?? null) : null);
+          setLaunchingApp(local.restore.app);
+          if (local.restore.payload && !local.restore.offlineBlocked) {
+            const probe = await ensureEntrypointReachable(local.restore.payload.embedUrl);
+            if (!probe.ok) {
+              console.warn("[ox-boot] Experience restore unreachable — falling back to Home", probe.reason);
+              leaveXperienceMode();
+              setLaunchingApp(null);
+              setOpened(null);
+              setMountedFrames([]);
+              setExperienceOfflineMessage(null);
+              setRestoreNotice(
+                probe.reason ??
+                  "OS Xperience could not restore the previous Experience. Returning Home.",
+              );
+              navigate("home", { replace: true });
+            } else {
+              applyMountPlan(nextLineup, local.restore.app.id, null, { app: local.restore.app });
+            }
+          } else if (local.restore.offlineBlocked) {
+            // Keep shell usable: do not stay on a white iframe — show Home with notice.
+            leaveXperienceMode();
+            setLaunchingApp(null);
+            setOpened(null);
+            setExperienceOfflineMessage(null);
+            setRestoreNotice(
+              local.restore.offlineMessage ??
+                "The previous Experience needs a connection. Your installation was preserved.",
+            );
+            navigate("home", { replace: true });
+          }
+        } catch (restoreError) {
+          console.warn("[ox-boot] Experience restore failed — falling back to Home", restoreError);
+          leaveXperienceMode();
+          setLaunchingApp(null);
+          setOpened(null);
+          setExperienceOfflineMessage(null);
+          setRestoreNotice("OS Xperience could not restore the previous Experience. Returning Home.");
+          navigate("home", { replace: true });
         }
       }
+
+      // Local shell is usable immediately — never hold skeletons on network/probe.
+      setLoading(false);
 
       if (!isOnline) {
         return;
@@ -647,7 +721,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [api, navigate, props.online, applyMountPlan, refreshLineup]);
+  }, [api, navigate, props.online, applyMountPlan, refreshLineup, ensureEntrypointReachable]);
 
   useEffect(() => {
     const poll = () => {
@@ -954,16 +1028,30 @@ export function ExperienceApp(props: ExperienceAppProps) {
       const nextLineup = refreshLineup([app, ...directory]);
       const online = !offline;
       const gate = canOperateOffline(app.offlineCapability, online);
-      applyMountPlan(nextLineup, app.id, activeIdRef.current, {
-        app,
-        offlineMessage: gate.ok
-          ? null
-          : (gate.reason ??
-            "This Experience needs a connection to continue. Your previous state has been preserved."),
-      });
+      if (!gate.ok) {
+        abortExperienceToHome(
+          gate.reason ??
+            "This Experience needs a connection to continue. Your previous state has been preserved.",
+        );
+        return;
+      }
+      void (async () => {
+        const url = app.xperienceUrl || app.productionUrl;
+        const probe = await ensureEntrypointReachable(url);
+        if (!probe.ok) {
+          abortExperienceToHome(
+            probe.reason ?? "This Experience could not be opened. Returning to OS Xperience Home.",
+          );
+          return;
+        }
+        applyMountPlan(nextLineup, app.id, activeIdRef.current, {
+          app,
+          offlineMessage: null,
+        });
+      })();
       void surface;
     },
-    [applyMountPlan, directory, offline, refreshLineup],
+    [abortExperienceToHome, applyMountPlan, directory, ensureEntrypointReachable, offline, refreshLineup],
   );
 
   const startApplication = useCallback(async (app: DirectoryApplicationView) => {
@@ -1351,6 +1439,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
       {error && screen !== "experience" ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
       {screen === "home" ? <div data-testid="home" className="ox-screen ox-home">
+        {restoreNotice ? (
+          <p className="ox-restore-notice" role="status" data-testid="restore-notice">
+            {restoreNotice}{" "}
+            <button type="button" className="ox-text-link" onClick={() => setRestoreNotice(null)}>
+              Dismiss
+            </button>
+          </p>
+        ) : null}
         <div className="ox-home-search-wrap">
           <form data-testid="home-search" className="ox-home-search ox-objective" onSubmit={submitObjective}>
             <Icon name="search" />
@@ -1640,18 +1736,18 @@ export function ExperienceApp(props: ExperienceAppProps) {
               </section>
             ) : null}
             {frameFailed && opened && !experienceOfflineMessage ? (
-              <section className="ox-frame-fallback ox-immersive-fallback">
+              <section className="ox-frame-fallback ox-immersive-fallback" data-testid="experience-frame-failed">
                 <h1>{opened.name} couldn&apos;t open</h1>
-                <p>It may only allow a full browser window.</p>
-                <button className="ox-button primary" type="button" onClick={() => openHttps(opened.embedUrl)}>
-                  Try again externally
-                </button>
-                <button className="ox-button secondary" type="button" onClick={exitExperienceToHome}>
+                <p>The Experience page failed to load. OS Xperience Home is still available.</p>
+                <button className="ox-button primary" type="button" onClick={exitExperienceToHome}>
                   Back to Home
+                </button>
+                <button className="ox-button secondary" type="button" onClick={() => openHttps(opened.embedUrl)}>
+                  Try again externally
                 </button>
               </section>
             ) : null}
-            {!experienceOfflineMessage
+            {!experienceOfflineMessage && !frameFailed
               ? mountedFrames.map((frame) => {
                   const active = frame.id === activeExperienceId;
                   return (
@@ -1665,14 +1761,28 @@ export function ExperienceApp(props: ExperienceAppProps) {
                       sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
                       referrerPolicy="strict-origin-when-cross-origin"
                       onError={() => {
-                        if (active) setFrameFailed(true);
+                        if (active) {
+                          setFrameFailed(true);
+                          setFrameReady(false);
+                        }
                       }}
                       onLoad={() => {
                         if (!active) return;
-                        markLaunch(launchTraceRef.current, "first_pixel");
-                        markLaunch(launchTraceRef.current, "interactive");
-                        summarizeLaunch(launchTraceRef.current);
-                        setFrameReady(true);
+                        void (async () => {
+                          // Error pages still fire onLoad; re-check reachability so we never
+                          // leave a white WebView error covering the OS shell.
+                          const probe = await ensureEntrypointReachable(frame.embedUrl);
+                          if (!probe.ok) {
+                            setFrameFailed(true);
+                            setFrameReady(false);
+                            return;
+                          }
+                          markLaunch(launchTraceRef.current, "first_pixel");
+                          markLaunch(launchTraceRef.current, "interactive");
+                          summarizeLaunch(launchTraceRef.current);
+                          setFrameReady(true);
+                          setFrameFailed(false);
+                        })();
                       }}
                     />
                   );
