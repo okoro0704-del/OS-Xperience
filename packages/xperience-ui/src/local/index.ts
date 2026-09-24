@@ -60,10 +60,14 @@ export {
 } from "./storage.js";
 export {
   RUNTIME_MODE_KEY,
+  LOCKED_KERNEL_KEY,
   enterXperienceMode,
   leaveXperienceMode,
+  readLockedKernelMode,
   readRuntimeMode,
+  writeLockedKernelMode,
   writeRuntimeMode,
+  type LockedKernelMode,
 } from "./mode.js";
 export {
   LINEUP_KEY,

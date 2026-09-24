@@ -540,6 +540,10 @@ html.ox-native-shell .ox-bottom-nav {
   background: #05070f;
   touch-action: auto;
 }
+.ox-deliverable-trigger,.ox-space-summon{position:absolute;top:calc(12px + var(--ox-safe-top));right:12px;z-index:40;border:0;border-radius:12px;background:rgba(5,8,16,.78);color:#fff;padding:10px;backdrop-filter:blur(12px)}
+.ox-deliverable-menu,.ox-space-controls{position:absolute;z-index:41;top:calc(54px + var(--ox-safe-top));right:12px;display:grid;gap:6px;padding:10px;border-radius:14px;background:rgba(5,8,16,.9);backdrop-filter:blur(16px)}
+.ox-deliverable-menu button,.ox-space-controls button{border:0;border-radius:9px;padding:9px 12px;background:rgba(36,57,93,.9);color:#fff;text-align:left}
+.ox-space-summon{left:12px;right:auto}.ox-space-controls{left:12px;right:auto}
 .ox-escape-hint {
   position: absolute;
   top: calc(14px + var(--ox-safe-top));
@@ -1022,4 +1026,3 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     transition: none !important;
   }
 }
-

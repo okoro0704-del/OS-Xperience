@@ -27,9 +27,11 @@ import {
   planSwitch,
   previousExperienceId,
   probeExperienceUrl,
+  readLockedKernelMode,
   rememberOpenedExperience,
   shellAuthPosture,
   storeCatalogPublicKey,
+  writeLockedKernelMode,
   type LineupEntry,
 } from "./local/index.js";
 import { ExperienceSwitcher, attachDoubleTap } from "./switcher/index.js";
@@ -69,6 +71,7 @@ import {
   type LaunchTrace,
 } from "./launch-metrics.js";
 import "./styles.css";
+import { MRFUNDZMANOS_EXPERIENCE_ID, lockFrameLineup, localSpaceResult, onlineDeliverableResult, resolveLockedExperience, type LockedKernel, type SpacePresentation } from "./locked-xperience.js";
 
 declare global {
   interface Window {
@@ -225,7 +228,6 @@ function BottomNav({
   go: (screen: Screen) => void;
   onEnterXperience: () => void;
 }) {
-  const runtimeMode = screen === "voice" ? "voice" : screen === "experience" ? "xperience" : null;
   return (
     <nav className="ox-bottom-nav" aria-label="Primary navigation">
       <button
@@ -247,37 +249,9 @@ function BottomNav({
         <span>Directory</span>
       </button>
 
-      <div
-        className={`ox-mode-switch${runtimeMode ? " has-mode" : ""}`}
-        role="group"
-        aria-label="Xperience Voice mode switch"
-        data-testid="nav-mode-switch"
-        data-mode={runtimeMode ?? "idle"}
-      >
-        <button
-          type="button"
-          data-testid="nav-xperience"
-          className={runtimeMode === "xperience" ? "is-active" : ""}
-          aria-pressed={runtimeMode === "xperience"}
-          onClick={onEnterXperience}
-        >
-          <Icon name="xperience" />
-          <span>Xperience</span>
-        </button>
-        <span className="ox-mode-switch-divider" aria-hidden="true">
-          ⇄
-        </span>
-        <button
-          type="button"
-          data-testid="nav-voice"
-          className={runtimeMode === "voice" ? "is-active" : ""}
-          aria-pressed={runtimeMode === "voice"}
-          onClick={() => go("voice")}
-        >
-          <Icon name="voice" />
-          <span>Voice</span>
-        </button>
-      </div>
+      <button type="button" data-testid="nav-xperience" className={`ox-nav-dest${screen === "experience" ? " active" : ""}`} onClick={onEnterXperience}>
+        <Icon name="xperience" /><span>Xperience</span>
+      </button>
 
       <button
         type="button"
@@ -306,6 +280,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const userId = props.userId ?? env?.VITE_XPERIENCE_USER_ID ?? "user-1";
   const userName = props.userName ?? env?.VITE_XPERIENCE_USER_NAME ?? "Member";
   const openExternalUrl = props.openExternalUrl;
+  const lockedExperienceId = env?.VITE_LOCKED_XPERIENCE_ID === "false" ? null : MRFUNDZMANOS_EXPERIENCE_ID;
   const api = useMemo<XperienceApiClient>(() => createXperienceApiClient({
     baseUrl: apiBase,
     actor: `USER:${userId}`,
@@ -361,6 +336,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [mountedFrames, setMountedFrames] = useState<
     { id: string; embedUrl: string; name: string }[]
   >([]);
+  const [lockedKernel, setLockedKernel] = useState<LockedKernel>(() => readLockedKernelMode());
+  const [spacePresentation, setSpacePresentation] = useState<SpacePresentation>("IMMERSIVE");
+  const [deliverableMenuOpen, setDeliverableMenuOpen] = useState(false);
+  const [spaceNotice, setSpaceNotice] = useState<string | null>(null);
   const [revealBanner, setRevealBanner] = useState<{ id: string; name: string } | null>(null);
   const bootRestoreDoneRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -378,6 +357,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
   stackRef.current = screenStack;
   mountedIdsRef.current = mountedFrames.map((frame) => frame.id);
   activeIdRef.current = activeExperienceId;
+
+  useEffect(() => {
+    writeLockedKernelMode(lockedKernel);
+  }, [lockedKernel]);
 
   const navigate = useCallback((next: Screen, options?: { replace?: boolean }) => {
     setScreen((current) => {
@@ -398,10 +381,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
           ...directory,
         ],
       });
-      setLineup(next);
-      return next;
+      const locked = lockFrameLineup(next, lockedExperienceId);
+      setLineup(locked);
+      return locked;
     },
-    [directory, memberships, offline],
+    [directory, memberships, offline, lockedExperienceId],
   );
 
   const dismissSwitcher = useCallback(() => {
@@ -453,10 +437,17 @@ export function ExperienceApp(props: ExperienceAppProps) {
       fromId: string | null,
       options?: { offlineMessage?: string | null; app?: DirectoryApplicationView },
     ) => {
+      const resolvedToId = resolveLockedExperience(toId, lockedExperienceId);
+      if (!resolvedToId) return;
+      const lockedLineup = lockFrameLineup(nextLineup, lockedExperienceId);
+      if (!lockedLineup.some((entry) => entry.experienceId === resolvedToId)) {
+        abortExperienceToHome("The configured mrfundzmanOS frame is unavailable on this installation.");
+        return;
+      }
       const plan = planSwitch({
-        lineup: nextLineup,
-        fromId,
-        toId,
+        lineup: lockedLineup,
+        fromId: resolveLockedExperience(fromId, lockedExperienceId),
+        toId: resolvedToId,
         previouslyMounted: mountedIdsRef.current,
       });
       if (!plan) return;
@@ -470,7 +461,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
           options?.offlineMessage ??
             "This Experience needs a connection to continue. Your previous state has been preserved.",
         );
-        const entry = nextLineup.find((item) => item.experienceId === toId);
+        const entry = lockedLineup.find((item) => item.experienceId === resolvedToId);
         if (entry) {
           setLaunchingApp(
             options?.app ?? {
@@ -506,19 +497,19 @@ export function ExperienceApp(props: ExperienceAppProps) {
             next.push(kept);
             continue;
           }
-          const entry = nextLineup.find((item) => item.experienceId === id);
+          const entry = lockedLineup.find((item) => item.experienceId === id);
           if (!entry) continue;
           next.push({ id, embedUrl: entry.entrypoint, name: entry.name });
         }
         return next;
       });
 
-      const activeEntry = nextLineup.find((item) => item.experienceId === toId);
+      const activeEntry = lockedLineup.find((item) => item.experienceId === resolvedToId);
       if (activeEntry) {
         const app =
           options?.app ??
-          directory.find((item) => item.id === toId) ??
-          memberships.find((item) => item.applicationId === toId)?.application;
+          directory.find((item) => item.id === resolvedToId) ??
+          memberships.find((item) => item.applicationId === resolvedToId)?.application;
         const payloadApp = app ?? {
           id: activeEntry.experienceId,
           name: activeEntry.name,
@@ -544,7 +535,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       }
       navigate("experience");
     },
-    [directory, memberships, navigate],
+    [abortExperienceToHome, directory, lockedExperienceId, memberships, navigate],
   );
 
   const switchToExperience = useCallback(
@@ -597,7 +588,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
     try {
       // Local-first: installation identity + registry + restore — no Xperience login.
-      const local = bootFromLocal({ online: isOnline });
+      const local = bootFromLocal({ online: isOnline, lockedExperienceId });
       setDirectory(local.directory);
       setFeatured(local.featured);
       setMemberships(local.memberships);
@@ -611,16 +602,16 @@ export function ExperienceApp(props: ExperienceAppProps) {
       if (local.restore && !bootRestoreDoneRef.current) {
         bootRestoreDoneRef.current = true;
         try {
-          const nextLineup = buildLineup({
+          const nextLineup = lockFrameLineup(buildLineup({
             online: isOnline,
             membershipIds: local.memberships.map((item) => item.applicationId),
             apps: local.directory,
-          });
+          }), lockedExperienceId);
           setLineup(nextLineup);
           setExperienceOfflineMessage(local.restore.offlineBlocked ? (local.restore.offlineMessage ?? null) : null);
           setLaunchingApp(local.restore.app);
           if (local.restore.payload && !local.restore.offlineBlocked) {
-            const probe = await ensureEntrypointReachable(local.restore.payload.embedUrl);
+            const probe = isOnline ? await ensureEntrypointReachable(local.restore.payload.embedUrl) : { ok: true as const };
             if (!probe.ok) {
               console.warn("[ox-boot] Experience restore unreachable — falling back to Home", probe.reason);
               leaveXperienceMode();
@@ -721,7 +712,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [api, navigate, props.online, applyMountPlan, refreshLineup, ensureEntrypointReachable]);
+  }, [api, navigate, props.online, applyMountPlan, refreshLineup, ensureEntrypointReachable, lockedExperienceId]);
 
   useEffect(() => {
     const poll = () => {
@@ -1399,12 +1390,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
         <button data-testid="nav-my-experience" className={screen === "my-experience" ? "active" : ""} onClick={() => navigate("my-experience")}><Icon name="experience" />My Xperience</button>
         <button className={screen === "profile" ? "active" : ""} onClick={() => navigate("profile")}><Icon name="profile" />Profile</button>
       </nav>
-      <button data-testid="nav-voice" className="ox-voice-launch" onClick={() => navigate("voice")}><span><Icon name="voice" /></span><b>Use your voice</b><small>Tell OS Xperience your objective</small></button>
       <div className="ox-side-user"><span>{initials(userName)}</span><div><strong>{userName}</strong><small>Participant</small></div></div>
     </aside> : null}
 
     <main className="ox-main" ref={(node) => { mainScrollRef.current = node; }}>
-      <div className="ox-topbar"><Brand /><div><button className="ox-icon-button" aria-label="Notifications"><Icon name="bell" /></button><button className="ox-avatar" aria-label="Open profile" onClick={() => navigate("profile")}>{initials(userName)}</button></div></div>
+      <div className="ox-topbar"><Brand /><div><button className="ox-icon-button" aria-label="Voice" data-testid="top-voice" onClick={() => navigate("voice")}><Icon name="voice" /></button><button className="ox-icon-button" aria-label="Notifications"><Icon name="bell" /></button><button className="ox-avatar" aria-label="Open profile" onClick={() => navigate("profile")}>{initials(userName)}</button></div></div>
       {offline ? <div className="ox-offline-banner" role="status" data-testid="offline-banner">You&apos;re offline. OS Xperience is running from this installation — online sync will resume when you reconnect.</div> : null}
       {revealBanner && screen !== "experience" ? (
         <div className="ox-reveal-banner" role="status" data-testid="reveal-banner">
@@ -1676,6 +1666,17 @@ export function ExperienceApp(props: ExperienceAppProps) {
             data-switcher-open={switcherOpen ? "1" : "0"}
             className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}${airGrabbed ? " is-grabbed" : ""}${navProgress > 0.02 ? " is-nav-dragging" : ""}`}
           >
+            {lockedKernel === "APP" ? <>
+              <button type="button" className="ox-deliverable-trigger" aria-label="mrfundzmanOS deliverables" onClick={() => setDeliverableMenuOpen((open) => !open)}>☰</button>
+              {deliverableMenuOpen ? <div className="ox-deliverable-menu" role="menu">
+                {["App", "News", "Digipedia", "TV", "Radio"].map((item) => <button key={item} type="button" role="menuitem" onClick={() => setSpaceNotice(onlineDeliverableResult(!offline) === "ONLINE_REQUIRED" ? "ONLINE_REQUIRED" : `${item} is available through the Online Kernel.`)}>{item}</button>)}
+                <button type="button" role="menuitem" onClick={() => { setLockedKernel("SPACE"); setSpacePresentation("IMMERSIVE"); setDeliverableMenuOpen(false); }}>Space</button>
+              </div> : null}
+            </> : <>
+              <button type="button" className="ox-space-summon" onClick={() => setSpacePresentation("CONTROLS_VISIBLE")}>Summon controls</button>
+              {spacePresentation !== "IMMERSIVE" ? <div className="ox-space-controls"><button onClick={() => setSpaceNotice(localSpaceResult(true))}>Space Switch</button><button onClick={() => setSpaceNotice("NO OTHER EXTERNAL SPACES")}>Revolve</button><button onClick={() => setLockedKernel("APP")}>Return to App</button></div> : null}
+            </>}
+            {spaceNotice ? <div className="ox-frame-note" role="status">{spaceNotice}</div> : null}
             <div
               ref={switcherEdgeLeftRef}
               className="ox-switcher-edge is-left"

@@ -55,7 +55,7 @@ function membershipFromEntry(entry: ExperienceRegistryEntry): ExperienceMembersh
   };
 }
 
-export function bootFromLocal(options?: { online?: boolean }): XperienceBootResult {
+export function bootFromLocal(options?: { online?: boolean; lockedExperienceId?: string | null }): XperienceBootResult {
   const online = options?.online ?? (typeof navigator !== "undefined" ? navigator.onLine : false);
   const installation = ensureInstallation();
   const lastMode = readRuntimeMode();
@@ -77,12 +77,14 @@ export function bootFromLocal(options?: { online?: boolean }): XperienceBootResu
   const firstOpen = !lastExperience;
   const shouldRestore = lastMode === "XPERIENCE" || firstOpen;
 
-  const targetId =
+  const restoredTargetId =
     lastExperience?.lastExperienceId ??
     installation.lastExperienceId ??
     (registry.some((e) => e.experienceId === MYBRANDOS_PUBLIC_ID)
       ? MYBRANDOS_PUBLIC_ID
       : registry.find(isMybrandPublic)?.experienceId);
+  // A host-configured lock normalizes stale state before any frame is resolved.
+  const targetId = options?.lockedExperienceId ?? restoredTargetId;
 
   if (shouldRestore && targetId) {
     const entry = findRegistryEntry(targetId) ?? registry.find((e) => e.experienceId === targetId);

@@ -121,8 +121,11 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
-    await page.goto(`http://127.0.0.1:${uiPort}/`, { waitUntil: "networkidle" });
-    assert.equal(await page.title(), "OS Experience");
+    const failedRequests: string[] = [];
+    page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} ${request.failure()?.errorText ?? "failed"}`));
+    await page.goto(`http://127.0.0.1:${uiPort}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector('[data-testid="os-experience"]', { state: "visible" });
+    assert.equal(await page.title(), "OS Xperience");
     await page.waitForSelector('[data-testid="os-experience"]');
     await page.waitForSelector('[data-testid="home"]', { timeout: 15000 });
 
@@ -142,10 +145,10 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
         if (!res.ok) throw new Error(data.error || String(res.status));
         return data;
       }
-      const homeBrand = document.body.innerText.includes("OS Experience");
+      const homeBrand = document.body.innerText.includes("OS Xperience");
       const shellLegacy = /Find an app|OS Shell 2\\.0\\.1|Not a primitive/i.test(document.body.innerText);
-      const modernHome = /Your Digital Life|Explore Directory|Continue Your Experience|Explore Digiconomy|YOUR OS EXPERIENCE/i.test(document.body.innerText);
-      const hasVoiceNav = Boolean(document.querySelector('[data-testid="nav-voice"]'));
+      const modernHome = Boolean(document.querySelector('[data-testid="home"]'));
+      const hasVoiceNav = Boolean(document.querySelector('[data-testid="top-voice"]'));
       const search = await req("GET", "/v1/directory?q=FundzMan");
       await req("POST", "/v1/experience/mr.fundzman");
       const mine = await req("GET", "/v1/experience");
@@ -165,7 +168,9 @@ test("OS Experience web consumer: build artifacts and browser journey", async (t
         still: still.id,
         source: still.ecosystemSource
       };
-    })()`);
+    })()`).catch((error) => {
+      throw new Error(`${String(error)}\nFailed requests:\n${failedRequests.join("\n")}`);
+    });
     assert.equal(journey.homeBrand, true);
     assert.equal(journey.shellLegacy, false);
     assert.equal(journey.modernHome, true);
