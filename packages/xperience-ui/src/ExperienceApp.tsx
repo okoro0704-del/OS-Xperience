@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { createHttpBroadcastSource, hydrateAndPrepareSpaceTv, IndexedDbBroadcastHydrationStore, localMediaBlob } from "@digiconomy/offline-kernel";
 import {
   DIRECTORY_CATEGORIES,
   parseExperienceUtterance,
@@ -340,6 +341,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [spacePresentation, setSpacePresentation] = useState<SpacePresentation>("IMMERSIVE");
   const [deliverableMenuOpen, setDeliverableMenuOpen] = useState(false);
   const [spaceNotice, setSpaceNotice] = useState<string | null>(null);
+  const [tvState, setTvState] = useState<"idle" | "preparing" | "playing" | "unavailable">("idle");
+  const [tvSource, setTvSource] = useState<string | null>(null);
+  const [tvTitle, setTvTitle] = useState<string | null>(null);
   const [revealBanner, setRevealBanner] = useState<{ id: string; name: string } | null>(null);
   const bootRestoreDoneRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -350,6 +354,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const mountedIdsRef = useRef<string[]>([]);
   const activeIdRef = useRef<string | null>(null);
   const airNavRef = useRef<AirNavigationController | null>(null);
+  const tvUrlRef = useRef<string | null>(null);
   const screenRef = useRef(screen);
   const stackRef = useRef(screenStack);
   const exitingRef = useRef(false);
@@ -1308,6 +1313,25 @@ export function ExperienceApp(props: ExperienceAppProps) {
     }
   }
 
+  const openTv = useCallback(async () => {
+    setDeliverableMenuOpen(false); setTvState("preparing"); setSpaceNotice(null);
+    const base = (window as Window & { __oxBroadcastApiBase?: string }).__oxBroadcastApiBase ?? (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_MYBRANDOS_PUBLIC_API_BASE;
+    if (!base) { setTvState("unavailable"); return; }
+    try {
+      const store = new IndexedDbBroadcastHydrationStore();
+      const result = await hydrateAndPrepareSpaceTv({ channelId: "mrfundzman.tv", routeAvailable: !offline, now: () => new Date(), store, source: createHttpBroadcastSource(base) });
+      const playback = result.playback;
+      if (!playback || playback.state !== "LOCAL_PLAYING") { setTvState("unavailable"); return; }
+      const local = await store.loadMedia(playback.media.mediaId) as (typeof playback.media & { bytes?: Uint8Array });
+      const blob = localMediaBlob(local);
+      if (!blob) { setTvState("unavailable"); return; }
+      if (tvUrlRef.current) URL.revokeObjectURL(tvUrlRef.current);
+      tvUrlRef.current = URL.createObjectURL(blob); setTvSource(tvUrlRef.current); setTvTitle(playback.media.title); setTvState("playing");
+    } catch { setTvState("unavailable"); }
+  }, [offline]);
+
+  useEffect(() => () => { if (tvUrlRef.current) URL.revokeObjectURL(tvUrlRef.current); }, []);
+
   const filteredDirectory = directory.filter((app) => category === "All" || app.category === category);
   const searchResults = directory.filter((app) => {
     const query = searchQuery.toLowerCase();
@@ -1669,14 +1693,19 @@ export function ExperienceApp(props: ExperienceAppProps) {
             {lockedKernel === "APP" ? <>
               <button type="button" className="ox-deliverable-trigger" aria-label="mrfundzmanOS deliverables" onClick={() => setDeliverableMenuOpen((open) => !open)}>☰</button>
               {deliverableMenuOpen ? <div className="ox-deliverable-menu" role="menu">
-                {["App", "News", "Digipedia", "TV", "Radio"].map((item) => <button key={item} type="button" role="menuitem" onClick={() => setSpaceNotice(onlineDeliverableResult(!offline) === "ONLINE_REQUIRED" ? "ONLINE_REQUIRED" : `${item} is available through the Online Kernel.`)}>{item}</button>)}
+                {["App", "News", "Digipedia", "TV", "Radio"].map((item) => <button key={item} type="button" role="menuitem" onClick={() => item === "TV" ? void openTv() : setSpaceNotice(onlineDeliverableResult(!offline) === "ONLINE_REQUIRED" ? "ONLINE_REQUIRED" : `${item} is available through the Online Kernel.`)}>{item}</button>)}
                 <button type="button" role="menuitem" onClick={() => { setLockedKernel("SPACE"); setSpacePresentation("IMMERSIVE"); setDeliverableMenuOpen(false); }}>Space</button>
               </div> : null}
             </> : <>
               <button type="button" className="ox-space-summon" onClick={() => setSpacePresentation("CONTROLS_VISIBLE")}>Summon controls</button>
-              {spacePresentation !== "IMMERSIVE" ? <div className="ox-space-controls"><button onClick={() => setSpaceNotice(localSpaceResult(true))}>Space Switch</button><button onClick={() => setSpaceNotice("NO OTHER EXTERNAL SPACES")}>Revolve</button><button onClick={() => setLockedKernel("APP")}>Return to App</button></div> : null}
+              {spacePresentation !== "IMMERSIVE" ? <div className="ox-space-controls"><button onClick={() => void openTv()}>TV</button><button onClick={() => setSpaceNotice(localSpaceResult(true))}>Space Switch</button><button onClick={() => setSpaceNotice("NO OTHER EXTERNAL SPACES")}>Revolve</button><button onClick={() => setLockedKernel("APP")}>Return to App</button></div> : null}
             </>}
             {spaceNotice ? <div className="ox-frame-note" role="status">{spaceNotice}</div> : null}
+            {tvState !== "idle" ? <section className="ox-tv-surface" data-testid="mrfundzman-tv">
+              {tvState === "preparing" ? <div role="status">Preparing broadcast...</div> : null}
+              {tvState === "unavailable" ? <div role="status">Broadcast unavailable</div> : null}
+              {tvState === "playing" && tvSource ? <><small>MRFUNDZMAN TV</small><strong>{tvTitle}</strong><video data-testid="mrfundzman-tv-video" src={tvSource} autoPlay muted playsInline controls onLoadedMetadata={(event) => { const video = event.currentTarget; void video.play().catch(() => undefined); }} /></> : null}
+            </section> : null}
             <div
               ref={switcherEdgeLeftRef}
               className="ox-switcher-edge is-left"

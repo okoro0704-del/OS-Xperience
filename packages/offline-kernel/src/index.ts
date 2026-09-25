@@ -32,3 +32,43 @@ export async function synchronizeProjection(
     return current;
   }
 }
+
+/** Canonical TV broadcast projection shared by APP and SPACE transports. */
+export type BroadcastMedia = { mediaId:string; publisherId:string; title:string; durationMs:number; version:string; contentType:string; byteLength:number; checksum:string; availability:LocalAssetState };
+export type BroadcastProgram = { programId:string; mediaId:string; scheduledStart:string; durationMs:number; sequence:number };
+export type BroadcastSchedule = { channelId:string; publisherId:string; scheduleId:string; scheduleVersion:number; programs:readonly BroadcastProgram[] };
+export type BroadcastNow = { currentProgram:BroadcastProgram; programStart:string; programEnd:string; offsetIntoProgramMs:number; nextProgram?:BroadcastProgram };
+export type TvPlayback = { state:"LOCAL_PLAYING"; media:BroadcastMedia; offsetMs:number; nextProgram?:BroadcastProgram } | { state:"MISSING_ASSET"|"CORRUPT_ASSET"|"STALE_SCHEDULE"|"ONLINE_REQUIRED"; reason:string };
+
+export function resolveBroadcastNow(schedule: BroadcastSchedule, now: Date): BroadcastNow | undefined {
+  const at = now.getTime();
+  const ordered = [...schedule.programs].sort((a,b) => a.sequence-b.sequence || Date.parse(a.scheduledStart)-Date.parse(b.scheduledStart));
+  const index = ordered.findIndex((program) => {
+    const start = Date.parse(program.scheduledStart); return start <= at && at < start + program.durationMs;
+  });
+  if (index < 0) return undefined;
+  const currentProgram = ordered[index]!;
+  const start = Date.parse(currentProgram.scheduledStart);
+  return { currentProgram, programStart: new Date(start).toISOString(), programEnd: new Date(start + currentProgram.durationMs).toISOString(), offsetIntoProgramMs: at - start, nextProgram: ordered[index + 1] };
+}
+
+export function prepareSpaceTv(schedule: BroadcastSchedule, media: readonly BroadcastMedia[], now: Date, expectedScheduleVersion = schedule.scheduleVersion): TvPlayback {
+  if (schedule.scheduleVersion !== expectedScheduleVersion) return { state:"STALE_SCHEDULE", reason:"LOCAL_SCHEDULE_VERSION_MISMATCH" };
+  const current = resolveBroadcastNow(schedule, now);
+  if (!current) return { state:"MISSING_ASSET", reason:"NO_SCHEDULED_PROGRAM" };
+  const asset = media.find((item) => item.mediaId === current.currentProgram.mediaId);
+  if (!asset || asset.availability === "MISSING") return { state:"MISSING_ASSET", reason:"LOCAL_MEDIA_NOT_PRESENT" };
+  if (asset.availability === "INVALID") return { state:"CORRUPT_ASSET", reason:"LOCAL_MEDIA_INTEGRITY_FAILED" };
+  if (asset.availability !== "AVAILABLE_LOCAL") return { state:"MISSING_ASSET", reason:"LOCAL_MEDIA_PARTIAL" };
+  return { state:"LOCAL_PLAYING", media:asset, offsetMs:current.offsetIntoProgramMs, nextProgram:current.nextProgram };
+}
+
+/** Online TV uses the same resolver and deliberately does not fall back to local assets. */
+export function prepareAppTv(schedule: BroadcastSchedule, now: Date, online: boolean): BroadcastNow | TvPlayback {
+  if (!online) return { state:"ONLINE_REQUIRED", reason:"APP_TV_REQUIRES_ROUTE" };
+  const current = resolveBroadcastNow(schedule, now);
+  return current ?? { state:"MISSING_ASSET", reason:"NO_SCHEDULED_PROGRAM" };
+}
+
+export * from "./hydration.js";
+export * from "./browser.js";

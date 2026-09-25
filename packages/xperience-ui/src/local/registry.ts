@@ -4,7 +4,7 @@ import {
   type DirectoryApplicationView,
   type ExperienceRegistryEntry,
 } from "@digiconomy/xperience-contract";
-import { MYBRANDOS_PUBLIC_ENTRY } from "./bootstrap.js";
+import { bootstrapPublicEntry } from "./bootstrap.js";
 import { readJson, writeJson } from "./storage.js";
 
 export const REGISTRY_KEY = "ox.experience-registry.v1";
@@ -73,7 +73,7 @@ export function syncRegistryFromDirectory(apps: DirectoryApplicationView[]): Exp
   }
   // Keep bootstrap mybrandOS if directory has no public mybrandOS yet.
   if (![...byId.values()].some(isMybrandPublic)) {
-    byId.set(MYBRANDOS_PUBLIC_ENTRY.experienceId, MYBRANDOS_PUBLIC_ENTRY);
+    const bootstrap = bootstrapPublicEntry(); byId.set(bootstrap.experienceId, bootstrap);
   }
   const next = [...byId.values()];
   writeRegistry(next);
@@ -83,8 +83,8 @@ export function syncRegistryFromDirectory(apps: DirectoryApplicationView[]): Exp
 export function ensureBootstrapRegistry(): ExperienceRegistryEntry[] {
   const current = readRegistry();
   if (current.length > 0) return current;
-  writeRegistry([MYBRANDOS_PUBLIC_ENTRY]);
-  return [MYBRANDOS_PUBLIC_ENTRY];
+  const bootstrap = bootstrapPublicEntry(); writeRegistry([bootstrap]);
+  return [bootstrap];
 }
 
 export function isMybrandPublic(entry: {
@@ -94,7 +94,7 @@ export function isMybrandPublic(entry: {
   id?: string;
 }): boolean {
   const id = entry.experienceId ?? entry.id;
-  if (id === MYBRANDOS_PUBLIC_ENTRY.experienceId) return true;
+  if (id === bootstrapPublicEntry().experienceId) return true;
   const name = entry.name.toLowerCase();
   if (name.includes("mybrandos") && !name.includes("studio")) return true;
   try {
