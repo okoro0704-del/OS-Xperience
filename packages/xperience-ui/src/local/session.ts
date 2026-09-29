@@ -1,7 +1,9 @@
-import type {
-  ApplicationSurfaceType,
-  ExperienceSlot,
-  LastExperienceState,
+import {
+  normalizeExecutionMode,
+  type ApplicationSurfaceType,
+  type ExperienceExecutionMode,
+  type ExperienceSlot,
+  type LastExperienceState,
 } from "@digiconomy/xperience-contract";
 import { getKvStore, readJson, writeJson } from "./storage.js";
 
@@ -31,6 +33,7 @@ export function readLastExperience(): LastExperienceState | null {
     surface: row.surface === "MANAGEMENT" ? "MANAGEMENT" : "PUBLIC",
     experienceStateReference:
       typeof row.experienceStateReference === "string" ? row.experienceStateReference : undefined,
+    ...(normalizeExecutionMode(row.executionMode) ? { executionMode: normalizeExecutionMode(row.executionMode)! } : {}),
   };
 }
 
@@ -65,6 +68,7 @@ export function readSlots(): Record<string, ExperienceSlot> {
           ? row.runtimeTier
           : undefined,
       offlineState: row.offlineState === "blocked" ? "blocked" : row.offlineState === "ok" ? "ok" : undefined,
+      ...(normalizeExecutionMode(row.executionMode) ? { executionMode: normalizeExecutionMode(row.executionMode)! } : {}),
     };
   }
   return out;
@@ -83,6 +87,7 @@ export function touchExperienceSlot(input: {
   route?: string;
   surface?: ApplicationSurfaceType;
   restoreState?: string;
+  executionMode?: ExperienceExecutionMode;
   now?: Date;
 }): ExperienceSlot {
   const now = (input.now ?? new Date()).toISOString();
@@ -93,6 +98,7 @@ export function touchExperienceSlot(input: {
     lastActiveAt: now,
     surface: input.surface ?? "PUBLIC",
     restoreState: assertSafeRestoreState(input.restoreState),
+    ...(input.executionMode ? { executionMode: input.executionMode } : {}),
   };
   slots[input.experienceId] = slot;
   writeSlots(slots);
@@ -102,6 +108,7 @@ export function touchExperienceSlot(input: {
     lastOpenedAt: now,
     surface: slot.surface,
     experienceStateReference: slot.restoreState,
+    ...(input.executionMode ? { executionMode: input.executionMode } : {}),
   });
   return slot;
 }

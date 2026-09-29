@@ -1,71 +1,232 @@
+/**
+ * Migrated from locked-by-default kernel hydration.
+ *
+ * The old tests assumed every viewport opened already inside the provider
+ * and could pick TV from the deliverables menu. That encoded
+ * device profile → Space.
+ *
+ * Current invariant, for desktop, phone, and large-display alike:
+ * - general launch stays on the Directory host (APP is not auto-entered, SPACE is not auto-entered);
+ * - explicit Xperience App uses the provider UI and does not touch the Offline Kernel broadcast;
+ * - explicit Xperience Space hydrates the Offline Kernel from the canonical MrFundzMan media;
+ * - after the producer is gone, TV plays that saved media from a local blob.
+ */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
-import { mkdtemp, rm } from "node:fs/promises";
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, extname, resolve } from "node:path";
+import { extname, join, resolve } from "node:path";
 import test from "node:test";
+import type { BrowserContext, Page } from "playwright";
 
-const fixture = "C:\\Users\\Hp\\Desktop\\d apple ville backup\\dapple-ville-haven\\test-results\\04-wallet-Wallet---Authent-daff7-ser-should-load-wallet-page-chromium\\video.webm";
+const fixture = "C:\\Users\\Hp\\Desktop\\MRFUNDZMAN-TV-ACCEPTANCE\\RCTH2872.MOV";
+const canonicalMediaId = "content:sha256:e1d41422304fcce946c6640d07999c41f499c340ba4f935166e656ae9e9d774e";
+const providerId = "bootstrap.mybrandos.public";
+const channelId = "mrfundzman.tv";
 const profiles = [
   { name: "desktop", viewport: { width: 1440, height: 900 }, isMobile: false, hasTouch: false },
   { name: "phone", viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
   { name: "large-display", viewport: { width: 1920, height: 1080 }, isMobile: false, hasTouch: false },
 ] as const;
-async function listen(handler: Parameters<typeof createServer>[0]) { const server = createServer(handler); await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve)); const address = server.address(); assert.ok(address && typeof address === "object"); return { server, port: address.port }; }
-async function close(server: ReturnType<typeof createServer>) { if (!server.listening) return; await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 
-for (const profile of profiles) test(`automatic kernel hydration works on ${profile.name}`, async (t) => {
-  let chromium: typeof import("playwright").chromium; try { ({ chromium } = await import("playwright")); } catch { t.skip("playwright unavailable"); return; }
-  const bytes = await readFile(fixture); const checksum = createHash("sha256").update(bytes).digest("hex"); const start = new Date(Date.now() - 10_000).toISOString(); const requests: string[] = [];
-  const broadcast = await listen((req, res) => { requests.push(req.url ?? ""); res.setHeader("access-control-allow-origin", "*"); if (req.url === "/api/public/broadcast/mrfundzman.tv") { res.setHeader("content-type", "application/json"); return res.end(JSON.stringify({ channelId:"mrfundzman.tv", publisherId:"test", scheduleId:"test", scheduleVersion:1, programs:[0,1,2].map((sequence) => ({ programId:`p${sequence}`, mediaId:`asset${sequence}`, title:`PROGRAM_${sequence}`, scheduledStart:new Date(Date.parse(start)+sequence*60_000).toISOString(), durationMs:60_000, sequence, media:{ path:`/public/test/assets/asset${sequence}/media`, version:"1", contentType:"video/webm", byteLength:bytes.byteLength, checksum } })) })); } if (req.url?.includes("/media")) { res.setHeader("content-type", "video/webm"); return res.end(bytes); } res.statusCode=404; res.end(); });
-  const bootstrap = await listen((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<!doctype html><title>mrfundzmanOS</title><main>mrfundzmanOS ready</main>"); });
+async function listen(handler: (req: IncomingMessage, res: ServerResponse) => void | Promise<void>) {
+  const server = createServer((req, res) => void handler(req, res));
+  await new Promise<void>((done) => server.listen(0, "127.0.0.1", done));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  return { server, port: address.port };
+}
+
+async function close(server: ReturnType<typeof createServer>) {
+  if (!server.listening) return;
+  server.closeAllConnections();
+  await new Promise<void>((done, fail) => server.close((error) => (error ? fail(error) : done())));
+}
+
+async function serveDist() {
   const dist = resolve("apps/os-experience/dist");
-  const xperience = await listen(async (req, res) => { const pathname = (req.url ?? "/").split("?")[0]!; const target = join(dist, pathname === "/" ? "index.html" : pathname); try { const body = await readFile(target); const extension = extname(target); res.setHeader("content-type", extension === ".js" ? "text/javascript" : extension === ".css" ? "text/css" : extension === ".html" ? "text/html" : "application/octet-stream"); res.end(body); } catch { res.setHeader("content-type", "text/html"); res.end(await readFile(join(dist, "index.html"))); } });
-  const profileDir = await mkdtemp(join(tmpdir(), "ox-hydration-")); let browser = await chromium.launchPersistentContext(profileDir, { headless:true, ...profile });
-  try {
-    const page = await browser.newPage(); const external:string[]=[]; page.on("request", request => { if (/mrfundzman\.getlifeos\.app|app\.getlifeos\.app/.test(request.url())) external.push(request.url()); });
-    await page.addInitScript(({ bootstrapPort, broadcastPort }) => { window.__oxBootstrapEntry = { experienceId:"bootstrap.mybrandos.public", name:"mybrandOS", version:"test", entrypoint:`http://127.0.0.1:${bootstrapPort}/`, origin:`http://127.0.0.1:${bootstrapPort}/`, authMode:"PUBLIC", offlineCapability:"PARTIAL", status:"READY", lastUpdatedAt:new Date().toISOString() }; window.__oxBroadcastApiBase=`http://127.0.0.1:${broadcastPort}`; }, { bootstrapPort:bootstrap.port, broadcastPort:broadcast.port });
-    await page.goto(`http://127.0.0.1:${xperience.port}/`, { waitUntil:"domcontentloaded" });
-    await page.waitForSelector('[data-testid="os-experience"]', { state:"visible", timeout:15_000 });
-    const deliverables = page.getByRole("button", { name: "mrfundzmanOS deliverables" });
-    if (profile.name === "phone") {
-      const controls = await page.evaluate(() => {
-        const voiceElement = document.querySelector<HTMLElement>('[data-testid="top-voice"]'); const deliverableElement = document.querySelector<HTMLElement>('.ox-deliverable-trigger'); const voiceRect = voiceElement?.getBoundingClientRect(); const deliverableRect = deliverableElement?.getBoundingClientRect();
-        return { viewport: { width: innerWidth, height: innerHeight }, voice: voiceRect ? { width:voiceRect.width, height:voiceRect.height, left:voiceRect.left, top:voiceRect.top, right:voiceRect.right, bottom:voiceRect.bottom } : undefined, deliverables: deliverableRect ? { width:deliverableRect.width, height:deliverableRect.height, left:deliverableRect.left, top:deliverableRect.top, right:deliverableRect.right, bottom:deliverableRect.bottom } : undefined, bottom: [...document.querySelectorAll<HTMLElement>('.ox-bottom-nav button')].map((element) => { const rect = element.getBoundingClientRect(); return { width:rect.width, height:rect.height, left:rect.left, top:rect.top, right:rect.right, bottom:rect.bottom }; }) };
-      });
-      const reachable = (control: { width:number; height:number; left:number; top:number; right:number; bottom:number } | undefined) => Boolean(control && control.width > 0 && control.height > 0 && control.left >= 0 && control.top >= 0 && control.right <= controls.viewport.width && control.bottom <= controls.viewport.height);
-      assert.ok(reachable(controls.voice), "phone top microphone is not reachable"); assert.ok(reachable(controls.deliverables), "phone deliverable control is not reachable"); assert.equal(controls.bottom.length, 0, "bottom navigation must be suppressed while the Xperience frame is active"); console.log("PHASE3_PHONE_CONTROLS_REACHABLE", "bottom-nav:suppressed-in-experience");
+  return listen(async (req, res) => {
+    const pathname = (req.url ?? "/").split("?")[0]!;
+    const target = join(dist, pathname === "/" ? "index.html" : pathname);
+    try {
+      const body = await readFile(target);
+      const extension = extname(target);
+      res.setHeader("content-type", extension === ".js" ? "text/javascript" : extension === ".css" ? "text/css" : extension === ".html" ? "text/html" : "application/octet-stream");
+      res.end(body);
+    } catch {
+      res.setHeader("content-type", "text/html");
+      res.end(await readFile(join(dist, "index.html")));
     }
-    await deliverables.click();
-    const tv = page.getByRole("menuitem", { name: "TV" });
-    await tv.click();
-    await page.waitForSelector('[data-testid="mrfundzman-tv"]', { state:"visible", timeout:15_000 });
-    await page.waitForSelector('[data-testid="mrfundzman-tv-video"]', { state:"visible", timeout:15_000 });
-    assert.ok(requests.includes("/api/public/broadcast/mrfundzman.tv")); assert.ok(requests.some((path) => path.includes("/media")));
-    const source = await page.getByTestId("mrfundzman-tv-video").getAttribute("src"); assert.match(source ?? "", /^blob:/);
-    await page.waitForFunction(() => { const video = document.querySelector<HTMLVideoElement>('[data-testid="mrfundzman-tv-video"]'); return Boolean(video && video.readyState >= 2); });
-    const before = await page.getByTestId("mrfundzman-tv-video").evaluate((video: HTMLVideoElement) => video.currentTime);
-    await page.waitForTimeout(600);
-    const after = await page.getByTestId("mrfundzman-tv-video").evaluate((video: HTMLVideoElement) => video.currentTime);
-    assert.ok(after > before, `video clock did not advance: ${before} → ${after}`);
-    const persisted = await page.evaluate(async () => new Promise<Array<{ key:string; value:unknown }>>((resolve, reject) => { const request = indexedDB.open("digiconomy-offline-kernel"); request.onsuccess = () => { const getAll = request.result.transaction("broadcast").objectStore("broadcast").getAll(); getAll.onsuccess = () => resolve(getAll.result as Array<{ key:string; value:unknown }>); getAll.onerror = () => reject(getAll.error); }; request.onerror = () => reject(request.error); }));
-    assert.ok(persisted.some((row) => row.key === "schedule:mrfundzman.tv")); assert.ok(persisted.some((row) => row.key === "media:asset0")); console.log("PHASE2_BROWSER1_PERSISTED", "schedule:mrfundzman.tv", "media:asset0");
-    await deliverables.click(); await page.getByRole("menuitem", { name:"Space" }).click(); await page.getByRole("button", { name:"Summon controls" }).click(); if (profile.name === "phone") { const spaceControl = await page.getByRole("button", { name:"TV", exact:true }).boundingBox(); assert.ok(spaceControl && spaceControl.width > 0 && spaceControl.height > 0 && spaceControl.x >= 0 && spaceControl.y >= 0 && spaceControl.x + spaceControl.width <= profile.viewport.width && spaceControl.y + spaceControl.height <= profile.viewport.height, "phone SPACE TV control is not reachable"); } await page.getByRole("button", { name:"Return to App" }).click(); await deliverables.waitFor({ state:"visible" }); console.log("PHASE2_REAL_UI_APP_TO_SPACE");
-    assert.equal(await page.title(), "OS Xperience"); assert.equal(external.length, 0);
-    await browser.close(); await close(broadcast.server); console.log("PHASE2_PRODUCER_UNAVAILABLE");
-    browser = await chromium.launchPersistentContext(profileDir, { headless:true, ...profile });
-    const offlinePage = await browser.newPage(); const offlineExternal:string[]=[]; offlinePage.on("request", request => { if (/mrfundzman\.getlifeos\.app|app\.getlifeos\.app/.test(request.url())) offlineExternal.push(request.url()); });
-    const offlineProducerAttempts:string[]=[]; offlinePage.on("request", request => { if (request.url().startsWith(`http://127.0.0.1:${broadcast.port}/`)) offlineProducerAttempts.push(request.url()); });
-    await offlinePage.addInitScript(({ bootstrapPort, broadcastPort }) => { window.__oxBootstrapEntry = { experienceId:"bootstrap.mybrandos.public", name:"mybrandOS", version:"test", entrypoint:`http://127.0.0.1:${bootstrapPort}/`, origin:`http://127.0.0.1:${bootstrapPort}/`, authMode:"PUBLIC", offlineCapability:"PARTIAL", status:"READY", lastUpdatedAt:new Date().toISOString() }; window.__oxBroadcastApiBase=`http://127.0.0.1:${broadcastPort}`; }, { bootstrapPort:bootstrap.port, broadcastPort:broadcast.port });
-    await offlinePage.goto(`http://127.0.0.1:${xperience.port}/`, { waitUntil:"domcontentloaded" }); await offlinePage.waitForSelector('[data-testid="os-experience"]', { state:"visible", timeout:15_000 });
-    const persistedBeforeTv = await offlinePage.evaluate(async () => new Promise<Array<{ key:string; value:{ scheduleVersion?:number; programs?:Array<{ programId:string; mediaId:string }>; bytes?:Uint8Array; checksum?:string } }>>((resolve, reject) => { const request = indexedDB.open("digiconomy-offline-kernel"); request.onsuccess = () => { const getAll = request.result.transaction("broadcast").objectStore("broadcast").getAll(); getAll.onsuccess = () => resolve(getAll.result as Array<{ key:string; value:{ scheduleVersion?:number; programs?:Array<{ programId:string; mediaId:string }>; bytes?:Uint8Array; checksum?:string } }>); getAll.onerror = () => reject(getAll.error); }; request.onerror = () => reject(request.error); }));
-    const schedule = persistedBeforeTv.find((row) => row.key === "schedule:mrfundzman.tv"); const media = persistedBeforeTv.find((row) => row.key === "media:asset0"); assert.equal(schedule?.value.scheduleVersion, 1); assert.equal(schedule?.value.programs?.[0]?.programId, "p0"); assert.equal(schedule?.value.programs?.[0]?.mediaId, "asset0"); assert.equal(media?.value.bytes?.byteLength, bytes.byteLength); assert.equal(media?.value.checksum, checksum); console.log("PHASE2_BROWSER2_PERSISTED_BEFORE_TV", "schedule:v1", "p0:asset0", "asset0:bytes+checksum");
-    console.log("PHASE2_BROWSER2_REAL_UI", (await offlinePage.locator("body").innerText()).slice(0, 400));
-    await offlinePage.getByRole("button", { name:"mrfundzmanOS deliverables" }).click(); await offlinePage.getByRole("menuitem", { name:"Space" }).click(); await offlinePage.getByRole("button", { name:"Summon controls" }).click(); await offlinePage.getByRole("button", { name:"TV", exact:true }).click();
-    await offlinePage.waitForSelector('[data-testid="mrfundzman-tv-video"]', { state:"visible", timeout:15_000 });
-    const offlineSource = await offlinePage.getByTestId("mrfundzman-tv-video").getAttribute("src"); assert.match(offlineSource ?? "", /^blob:/); await offlinePage.waitForFunction(() => { const video = document.querySelector<HTMLVideoElement>('[data-testid="mrfundzman-tv-video"]'); return Boolean(video && video.readyState >= 2); }); const videoState = await offlinePage.getByTestId("mrfundzman-tv-video").evaluate((video: HTMLVideoElement) => ({ readyState:video.readyState, width:video.videoWidth, height:video.videoHeight, time:video.currentTime, renderedWidth:video.getBoundingClientRect().width, renderedHeight:video.getBoundingClientRect().height })); assert.ok(Math.abs(videoState.renderedWidth / videoState.renderedHeight - videoState.width / videoState.height) < 0.02, `video aspect ratio distorted on ${profile.name}`); await offlinePage.waitForTimeout(700); const videoAfter = await offlinePage.getByTestId("mrfundzman-tv-video").evaluate((video: HTMLVideoElement) => video.currentTime); assert.ok(videoAfter > videoState.time, `offline video clock did not advance: ${videoState.time} → ${videoAfter}`); console.log("PHASE2_LOCAL_BLOB_PLAYBACK", offlineSource);
-    const projectionAttempts = offlineProducerAttempts.filter((url) => url.includes("/broadcast/")).length; const mediaAttempts = offlineProducerAttempts.filter((url) => url.includes("/media")).length; assert.ok(projectionAttempts >= 1, "browser 2 did not attempt the unavailable projection"); assert.equal(offlineExternal.length, 0); console.log("PHASE2_APP_TO_SPACE_TO_TV_COMPLETE", `projection-attempts:${projectionAttempts}`, `media-attempts:${mediaAttempts}`, `ready:${videoState.readyState}`, `dimensions:${videoState.width}x${videoState.height}`, `time:${videoState.time}->${videoAfter}`);
-  } finally { await browser.close(); await close(broadcast.server); await close(bootstrap.server); await close(xperience.server); await rm(profileDir,{recursive:true,force:true}); }
-});
+  });
+}
+
+for (const profile of profiles) {
+  test(`explicit ${profile.name} presentation does not select execution; SPACE hydrates the offline kernel`, async (t) => {
+    let chromium: typeof import("playwright").chromium;
+    try {
+      ({ chromium } = await import("playwright"));
+    } catch {
+      t.skip("playwright unavailable");
+      return;
+    }
+
+    const bytes = await readFile(fixture);
+    const checksum = createHash("sha256").update(bytes).digest("hex");
+    assert.equal(checksum, canonicalMediaId.slice("content:sha256:".length));
+    const requests: string[] = [];
+    const startedAt = new Date(Date.now() - 10_000).toISOString();
+    const broadcast = await listen((req, res) => {
+      const url = req.url ?? "";
+      requests.push(url);
+      res.setHeader("access-control-allow-origin", "*");
+      if (url === `/api/public/broadcast/${channelId}`) {
+        res.setHeader("content-type", "application/json");
+        res.end(JSON.stringify({
+          channelId,
+          publisherId: "mrfundzman",
+          scheduleId: "mrfundzman-tv",
+          scheduleVersion: 1,
+          programs: [0, 1, 2].map((sequence) => ({
+            programId: `p${sequence}`,
+            mediaId: canonicalMediaId,
+            title: `MRFUNDZMAN TV RCTH2872 ${sequence + 1}`,
+            scheduledStart: new Date(Date.parse(startedAt) + sequence * 600_000).toISOString(),
+            durationMs: 600_000,
+            sequence,
+            media: {
+              path: "/public/mrfundzman-tv/RCTH2872/media",
+              version: "1",
+              contentType: "video/quicktime",
+              byteLength: bytes.byteLength,
+              checksum,
+            },
+          })),
+        }));
+        return;
+      }
+      if (url.includes("/media")) {
+        res.setHeader("content-type", "video/quicktime");
+        res.end(bytes);
+        return;
+      }
+      res.statusCode = 404;
+      res.end();
+    });
+    const bootstrap = await listen((_req, res) => {
+      res.setHeader("content-type", "text/html");
+      res.end("<!doctype html><title>mrfundzmanOS</title><main>mrfundzmanOS ready</main>");
+    });
+    const xperience = await serveDist();
+    const profileDir = await mkdtemp(join(tmpdir(), "ox-hydration-"));
+    let browser = await chromium.launchPersistentContext(profileDir, { headless: true, ...profile });
+
+    const arm = async (context: BrowserContext) => {
+      const page = await context.newPage();
+      const external: string[] = [];
+      const producer: string[] = [];
+      page.on("request", (request) => {
+        const url = request.url();
+        if (/mrfundzman\.getlifeos\.app|app\.getlifeos\.app/.test(url)) external.push(url);
+        if (url.startsWith(`http://127.0.0.1:${broadcast.port}/`)) producer.push(url);
+      });
+      await page.addInitScript(({ bootstrapPort, broadcastPort }) => {
+        const host = window as Window & Record<string, unknown>;
+        host.__oxBootstrapEntry = {
+          experienceId: "bootstrap.mybrandos.public",
+          name: "mybrandOS",
+          version: "test",
+          entrypoint: `http://127.0.0.1:${bootstrapPort}/`,
+          origin: `http://127.0.0.1:${bootstrapPort}/`,
+          authMode: "PUBLIC",
+          offlineCapability: "PARTIAL",
+          status: "READY",
+          lastUpdatedAt: new Date().toISOString(),
+        };
+        host.__oxBroadcastApiBase = `http://127.0.0.1:${broadcastPort}`;
+      }, { bootstrapPort: bootstrap.port, broadcastPort: broadcast.port });
+      await page.goto(`http://127.0.0.1:${xperience.port}/`, { waitUntil: "domcontentloaded" });
+      await page.waitForSelector('[data-testid="os-experience"]', { state: "visible", timeout: 15_000 });
+      return { page, external, producer };
+    };
+
+    const expectMode = (page: Page, mode: "APP" | "SPACE") =>
+      page.waitForSelector(`[data-testid="in-app-experience"][data-execution-mode="${mode}"][data-provider-id="${providerId}"]`, { timeout: 15_000 });
+
+    try {
+      const { page, external } = await arm(browser);
+      await page.waitForSelector('[data-testid="home"]', { timeout: 15_000 });
+      assert.equal(await page.getByTestId("in-app-experience").count(), 0, `${profile.name} must not auto-enter Space or App`);
+      await page.getByTestId("nav-directory").click();
+      const card = page.getByTestId(`provider-card-${providerId}`);
+      await card.waitFor({ state: "visible" });
+      assert.deepEqual(await page.getByTestId(`provider-modes-${providerId}`).locator("em").allInnerTexts(), ["APP", "SPACE"]);
+      await card.locator(".ox-card-main").click();
+      await page.getByTestId(`xperience-target-${providerId}-app`).click();
+      await expectMode(page, "APP");
+      assert.equal(requests.length, 0, "APP must not hydrate the offline broadcast");
+      assert.equal(await page.getByTestId("space-tv").count(), 0);
+
+      await page.getByTestId("xperience-host-controls").click();
+      await page.getByRole("menuitem", { name: "Xperience Space" }).click();
+      await expectMode(page, "SPACE");
+      assert.equal(await page.getByTestId("in-app-experience").getAttribute("data-provider-id"), providerId);
+      await page.getByRole("button", { name: "Summon controls" }).click();
+      if (profile.name === "phone") {
+        const box = await page.getByRole("button", { name: "TV", exact: true }).boundingBox();
+        assert.ok(box && box.width > 0 && box.x >= 0 && box.x + box.width <= profile.viewport.width && box.y + box.height <= profile.viewport.height);
+      }
+      await page.getByRole("button", { name: "TV", exact: true }).click();
+      await page.waitForFunction((mediaId) => {
+        const video = document.querySelector<HTMLVideoElement>('[data-testid="space-tv-video"]');
+        const title = document.querySelector("[data-testid='space-tv-title']")?.textContent ?? "";
+        return Boolean(video && video.src.startsWith("blob:") && title === mediaId && video.readyState >= 2 && video.videoWidth > 0);
+      }, canonicalMediaId, { timeout: 90_000 });
+      const before = await page.getByTestId("space-tv-video").evaluate((video: HTMLVideoElement) => video.currentTime);
+      await page.waitForTimeout(700);
+      const after = await page.getByTestId("space-tv-video").evaluate((video: HTMLVideoElement) => video.currentTime);
+      assert.ok(after > before, `video clock did not advance: ${before} → ${after}`);
+      assert.ok(requests.includes(`/api/public/broadcast/${channelId}`));
+      assert.ok(requests.some((path) => path.includes("/media")));
+      const persisted = await page.evaluate(() => new Promise<Array<{ key: string }>>((done, fail) => {
+        const request = indexedDB.open("digiconomy-offline-kernel");
+        request.onsuccess = () => {
+          const all = request.result.transaction("broadcast").objectStore("broadcast").getAll();
+          all.onsuccess = () => done(all.result as Array<{ key: string }>);
+          all.onerror = () => fail(all.error);
+        };
+        request.onerror = () => fail(request.error);
+      }));
+      assert.ok(persisted.some((row) => row.key === `schedule:${channelId}`));
+      assert.ok(persisted.some((row) => row.key === `media:${canonicalMediaId}`));
+      assert.equal(external.length, 0);
+
+      await browser.close();
+      await close(broadcast.server);
+      browser = await chromium.launchPersistentContext(profileDir, { headless: true, ...profile });
+      const offline = await arm(browser);
+      await expectMode(offline.page, "SPACE");
+      await offline.page.getByRole("button", { name: "Summon controls" }).click();
+      await offline.page.getByRole("button", { name: "TV", exact: true }).click();
+      await offline.page.waitForFunction((mediaId) => {
+        const video = document.querySelector<HTMLVideoElement>('[data-testid="space-tv-video"]');
+        const title = document.querySelector("[data-testid='space-tv-title']")?.textContent ?? "";
+        return Boolean(video && video.src.startsWith("blob:") && title === mediaId && video.readyState >= 2 && video.videoWidth > 0);
+      }, canonicalMediaId, { timeout: 90_000 });
+      const offlineBefore = await offline.page.getByTestId("space-tv-video").evaluate((video: HTMLVideoElement) => video.currentTime);
+      await offline.page.waitForTimeout(700);
+      const offlineAfter = await offline.page.getByTestId("space-tv-video").evaluate((video: HTMLVideoElement) => video.currentTime);
+      assert.ok(offlineAfter > offlineBefore, `offline video clock did not advance: ${offlineBefore} → ${offlineAfter}`);
+      const mediaAttempts = offline.producer.filter((url) => url.includes("/media")).length;
+      assert.equal(mediaAttempts, 0, "NO_ROUTE playback must not request media bytes");
+      assert.ok(offline.producer.some((url) => url.includes("/broadcast/")), "NO_ROUTE still attempts the unavailable projection");
+      assert.equal(offline.external.length, 0);
+    } finally {
+      await browser.close().catch(() => undefined);
+      await close(broadcast.server);
+      await close(bootstrap.server);
+      await close(xperience.server);
+      await rm(profileDir, { recursive: true, force: true });
+    }
+  });
+}

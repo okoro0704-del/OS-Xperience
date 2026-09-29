@@ -90,6 +90,14 @@ export {
 } from "./runtime.js";
 export { probeExperienceUrl } from "./probe.js";
 export {
+  availableProviderTargets,
+  chooseExecutionTarget,
+  nextProviderWithMode,
+  providerTarget,
+  providerTargets,
+  type ProviderRef,
+} from "./targets.js";
+export {
   CATALOG_KEY,
   applyCatalogUpdate,
   catalogEntryLaunchable,

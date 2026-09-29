@@ -81,6 +81,29 @@ export function canPreloadByRelease(releaseState: ExperienceReleaseState): boole
   return releaseState === "PRELOADED" || releaseState === "LOCKED" || releaseState === "LIVE";
 }
 
+/**
+ * Execution modes of one provider. APP runs the provider's own UI on the Online Kernel;
+ * SPACE runs the provider through the Offline Kernel. Both share the provider identity.
+ */
+export const EXPERIENCE_EXECUTION_MODES = ["APP", "SPACE"] as const;
+export type ExperienceExecutionMode = (typeof EXPERIENCE_EXECUTION_MODES)[number];
+
+export function normalizeExecutionMode(value: unknown): ExperienceExecutionMode | null {
+  return value === "APP" || value === "SPACE" ? value : null;
+}
+
+/** One execution mode declared on a provider's catalog entry. */
+export interface CatalogExecutionTarget {
+  mode: ExperienceExecutionMode;
+  /** Defaults to the provider entrypoint. */
+  entrypoint?: string;
+  /** Mode-level gate; the provider-level release still applies first. */
+  releaseState?: ExperienceReleaseState;
+  visibility?: ExperienceVisibility;
+  /** SPACE: broadcast channel the Offline Kernel hydrates for this provider. */
+  broadcastChannelId?: string;
+}
+
 export interface CatalogExperienceEntry {
   experienceId: string;
   name: string;
@@ -97,6 +120,85 @@ export interface CatalogExperienceEntry {
   packageUrl?: string;
   releasedAt?: string;
   updatedAt: string;
+  /** Absent means APP only. */
+  executionModes?: CatalogExecutionTarget[];
+}
+
+export type ExperienceTargetAvailability = "AVAILABLE" | "NOT_RELEASED" | "NOT_LISTED";
+
+/** A launchable (provider, execution mode) pair resolved from catalog or registry data. */
+export interface ExperienceTarget {
+  providerId: string;
+  executionMode: ExperienceExecutionMode;
+  entrypoint: string;
+  /** Undefined when the source carries no release data (local registry without a signed catalog). */
+  releaseState?: ExperienceReleaseState;
+  visibility?: ExperienceVisibility;
+  availability: ExperienceTargetAvailability;
+  broadcastChannelId?: string;
+}
+
+export interface ExperienceTargetSource {
+  experienceId: string;
+  entrypoint: string;
+  releaseState?: ExperienceReleaseState;
+  visibility?: ExperienceVisibility;
+  executionModes?: CatalogExecutionTarget[];
+}
+
+function gateAvailability(
+  releaseState: ExperienceReleaseState | undefined,
+  visibility: ExperienceVisibility | undefined,
+): ExperienceTargetAvailability {
+  if (releaseState === undefined) return "AVAILABLE";
+  if (releaseState !== "LIVE") return "NOT_RELEASED";
+  return isConsumerDiscoverable(releaseState, visibility ?? "HIDDEN") ? "AVAILABLE" : "NOT_LISTED";
+}
+
+export function declaredExecutionModes(source: Pick<ExperienceTargetSource, "executionModes">): CatalogExecutionTarget[] {
+  const declared = (source.executionModes ?? []).filter((item) => normalizeExecutionMode(item?.mode));
+  if (declared.length === 0) return [{ mode: "APP" }];
+  const seen = new Set<ExperienceExecutionMode>();
+  return declared.filter((item) => (seen.has(item.mode) ? false : (seen.add(item.mode), true)));
+}
+
+/**
+ * Every declared mode of a provider, gated by provider release first and mode release second.
+ * Presentation (phone/tablet/desktop/TV) and platform never participate.
+ */
+export function resolveExperienceTargets(source: ExperienceTargetSource): ExperienceTarget[] {
+  const providerGate = gateAvailability(source.releaseState, source.visibility);
+  return declaredExecutionModes(source).map((mode) => {
+    const modeGate = gateAvailability(mode.releaseState, mode.visibility);
+    const providerBlocks = providerGate !== "AVAILABLE";
+    return {
+      providerId: source.experienceId,
+      executionMode: mode.mode,
+      entrypoint: mode.entrypoint || source.entrypoint,
+      releaseState: providerBlocks ? source.releaseState : (mode.releaseState ?? source.releaseState),
+      visibility: providerBlocks ? source.visibility : (mode.visibility ?? source.visibility),
+      availability: providerBlocks ? providerGate : modeGate,
+      ...(mode.broadcastChannelId ? { broadcastChannelId: mode.broadcastChannelId } : {}),
+    };
+  });
+}
+
+export function availableExperienceTargets(source: ExperienceTargetSource): ExperienceTarget[] {
+  return resolveExperienceTargets(source).filter((target) => target.availability === "AVAILABLE");
+}
+
+export function findExperienceTarget(
+  source: ExperienceTargetSource,
+  mode: ExperienceExecutionMode,
+): ExperienceTarget | null {
+  return availableExperienceTargets(source).find((target) => target.executionMode === mode) ?? null;
+}
+
+/** Consumer catalogs only carry modes a consumer may discover. */
+export function withDiscoverableExecutionModes(entry: CatalogExperienceEntry): CatalogExperienceEntry {
+  if (!entry.executionModes) return entry;
+  const allowed = new Set(availableExperienceTargets(entry).map((target) => target.executionMode));
+  return { ...entry, executionModes: entry.executionModes.filter((mode) => allowed.has(mode.mode)) };
 }
 
 export interface ExperienceCatalogPayload {

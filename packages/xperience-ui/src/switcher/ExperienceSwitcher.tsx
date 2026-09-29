@@ -1,15 +1,24 @@
-import type { ExperienceAvailability } from "@digiconomy/xperience-contract";
+import type { ExperienceAvailability, ExperienceExecutionMode } from "@digiconomy/xperience-contract";
 import type { LineupEntry } from "../local/lineup.js";
 
 export interface ExperienceSwitcherProps {
   open: boolean;
   lineup: LineupEntry[];
   activeId: string | null;
+  /** Provider switching — changes which provider is active. */
   onSelect: (experienceId: string) => void;
   onNext: () => void;
   onPrevious: () => void;
   onDismiss: () => void;
+  /** Mode switching — changes APP ↔ SPACE on the active provider only. */
+  activeMode?: ExperienceExecutionMode;
+  activeModes?: ExperienceExecutionMode[];
+  modeSwitchAllowed?: boolean;
+  onSelectMode?: (mode: ExperienceExecutionMode) => void;
+  modesFor?: (experienceId: string) => ExperienceExecutionMode[];
 }
+
+const MODE_LABEL: Record<ExperienceExecutionMode, string> = { APP: "App", SPACE: "Space" };
 
 function availabilityLabel(value: ExperienceAvailability): string {
   switch (value) {
@@ -30,6 +39,8 @@ function availabilityLabel(value: ExperienceAvailability): string {
 
 export function ExperienceSwitcher(props: ExperienceSwitcherProps) {
   if (!props.open) return null;
+  const activeModes = props.activeModes ?? [];
+  const showModes = Boolean(props.onSelectMode && props.modeSwitchAllowed !== false && activeModes.length > 1);
   return (
     <div
       className="ox-switcher"
@@ -49,6 +60,23 @@ export function ExperienceSwitcher(props: ExperienceSwitcherProps) {
             Close
           </button>
         </header>
+        {showModes ? (
+          <div className="ox-switcher-remote" role="radiogroup" aria-label="Execution mode" data-testid="switcher-modes">
+            {activeModes.map((mode) => (
+              <button
+                key={mode}
+                type="button"
+                role="radio"
+                aria-checked={mode === props.activeMode}
+                data-testid={`switcher-mode-${mode.toLowerCase()}`}
+                className={`ox-button compact ${mode === props.activeMode ? "primary" : "secondary"}`}
+                onClick={() => props.onSelectMode?.(mode)}
+              >
+                {MODE_LABEL[mode]}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="ox-switcher-remote" role="toolbar" aria-label="Channel controls">
           <button type="button" data-testid="switcher-prev" className="ox-button secondary compact" onClick={props.onPrevious}>
             Prev
@@ -64,6 +92,7 @@ export function ExperienceSwitcher(props: ExperienceSwitcherProps) {
               item.availability === "CONNECTION_REQUIRED" ||
               item.availability === "DISABLED" ||
               item.availability === "LOCKED";
+            const modes = props.modesFor?.(item.experienceId) ?? [];
             return (
               <li key={item.experienceId}>
                 <button
@@ -73,8 +102,11 @@ export function ExperienceSwitcher(props: ExperienceSwitcherProps) {
                   onClick={() => props.onSelect(item.experienceId)}
                 >
                   <span className="ox-switcher-name">{item.name}</span>
-                  <small>{availabilityLabel(item.availability)}</small>
-                  {active ? <em>Now</em> : null}
+                  <small>
+                    {availabilityLabel(item.availability)}
+                    {modes.length ? ` · ${modes.map((mode) => MODE_LABEL[mode]).join(" / ")}` : ""}
+                  </small>
+                  {active ? <em>Now{props.activeMode ? ` · ${MODE_LABEL[props.activeMode]}` : ""}</em> : null}
                 </button>
               </li>
             );

@@ -1,5 +1,6 @@
 import type {
   DirectoryApplicationView,
+  ExperienceExecutionMode,
   ExperienceMembershipView,
   ExperienceRegistryEntry,
   LastExperienceState,
@@ -30,6 +31,8 @@ export interface XperienceBootResult {
   /** When set, UI should restore this Experience (or show offline gate). */
   restore: {
     app: DirectoryApplicationView;
+    /** Mode the provider was last running in; undefined for records written before modes existed. */
+    executionMode?: ExperienceExecutionMode;
     payload: OpenExperiencePayload | null;
     offlineBlocked: boolean;
     offlineMessage?: string;
@@ -55,7 +58,12 @@ function membershipFromEntry(entry: ExperienceRegistryEntry): ExperienceMembersh
   };
 }
 
-export function bootFromLocal(options?: { online?: boolean; lockedExperienceId?: string | null }): XperienceBootResult {
+export function bootFromLocal(options?: {
+  online?: boolean;
+  lockedExperienceId?: string | null;
+  /** X1 first-open auto-entry. General directory hosts disable it so first open lands on the Directory. */
+  restoreOnFirstOpen?: boolean;
+}): XperienceBootResult {
   const online = options?.online ?? (typeof navigator !== "undefined" ? navigator.onLine : false);
   const installation = ensureInstallation();
   const lastMode = readRuntimeMode();
@@ -75,7 +83,7 @@ export function bootFromLocal(options?: { online?: boolean; lockedExperienceId?:
   // X2: restore only when last mode was XPERIENCE, or first open (X1 bootstrap).
   // Leaving to Home sets mode HOME — do not force Experience again.
   const firstOpen = !lastExperience;
-  const shouldRestore = lastMode === "XPERIENCE" || firstOpen;
+  const shouldRestore = lastMode === "XPERIENCE" || (firstOpen && options?.restoreOnFirstOpen !== false);
 
   const restoredTargetId =
     lastExperience?.lastExperienceId ??
@@ -90,11 +98,14 @@ export function bootFromLocal(options?: { online?: boolean; lockedExperienceId?:
     const entry = findRegistryEntry(targetId) ?? registry.find((e) => e.experienceId === targetId);
     if (entry) {
       const app = entryToOpenApp(entry);
+      const executionMode =
+        lastExperience?.lastExperienceId === entry.experienceId ? lastExperience.executionMode : undefined;
       const shellAuth = shellAuthPosture(entry.authMode);
       const offlineCheck = canOperateOffline(entry.offlineCapability, online);
       if (!offlineCheck.ok) {
         restore = {
           app,
+          ...(executionMode ? { executionMode } : {}),
           payload: null,
           offlineBlocked: true,
           offlineMessage: offlineCheck.reason,
@@ -115,7 +126,7 @@ export function bootFromLocal(options?: { online?: boolean; lockedExperienceId?:
         } catch {
           payload = buildLocalOpenPayload(app, "PUBLIC");
         }
-        restore = { app, payload, offlineBlocked: false, shellAuth };
+        restore = { app, ...(executionMode ? { executionMode } : {}), payload, offlineBlocked: false, shellAuth };
         enterXperienceMode();
       }
     }
@@ -147,11 +158,13 @@ export function rememberOpenedExperience(
   app: DirectoryApplicationView,
   surface: "PUBLIC" | "MANAGEMENT" = "PUBLIC",
   route?: string,
+  executionMode?: ExperienceExecutionMode,
 ): void {
   touchExperienceSlot({
     experienceId: app.id,
     surface,
     route,
+    ...(executionMode ? { executionMode } : {}),
   });
   updateInstallationLastExperience(app.id);
   enterXperienceMode();

@@ -6,7 +6,9 @@ import {
   normalizeVisibility,
   releaseTransitionAllowed,
   signExperienceCatalog,
+  withDiscoverableExecutionModes,
   type CatalogExperienceEntry,
+  type ExperienceExecutionMode,
   type ExperienceCatalogPayload,
   type ExperienceReleaseState,
   type ExperienceVisibility,
@@ -27,6 +29,8 @@ export interface ReleaseChangeAudit {
   actorType: string;
   at: string;
   confirmedLive?: boolean;
+  /** Present when the change targeted one execution mode rather than the whole provider. */
+  executionMode?: ExperienceExecutionMode;
 }
 
 type CatalogListener = (manifestVersion: number) => void;
@@ -50,6 +54,10 @@ function seedEntries(): CatalogExperienceEntry[] {
       packageUrl: "https://mrfundzman.getlifeos.app/",
       releasedAt: now,
       updatedAt: now,
+      executionModes: [
+        { mode: "APP", releaseState: "LIVE", visibility: "FEATURED" },
+        { mode: "SPACE", releaseState: "LIVE", visibility: "FEATURED", broadcastChannelId: "mrfundzman.tv" },
+      ],
     },
     {
       experienceId: "lifeos",
@@ -66,6 +74,7 @@ function seedEntries(): CatalogExperienceEntry[] {
       contentHash: "sha256:lifeos-preload-v1",
       packageUrl: "https://app.getlifeos.app/",
       updatedAt: now,
+      executionModes: [{ mode: "APP" }],
     },
   ];
 }
@@ -121,9 +130,9 @@ export class ExperienceReleaseCatalog {
     const full = await this.buildSignedCatalog();
     const payload: ExperienceCatalogPayload = {
       ...full.payload,
-      experiences: full.payload.experiences.filter((item) =>
-        isConsumerDiscoverable(item.releaseState, item.visibility),
-      ),
+      experiences: full.payload.experiences
+        .filter((item) => isConsumerDiscoverable(item.releaseState, item.visibility))
+        .map(withDiscoverableExecutionModes),
     };
     const keys = await getCatalogSigningKeys();
     return signExperienceCatalog(payload, keys.privateKey);
@@ -203,6 +212,65 @@ export class ExperienceReleaseCatalog {
       from: current.releaseState,
       to,
       visibilityFrom: current.visibility,
+      visibilityTo,
+      actorId: actor.id,
+      actorType: actor.role,
+      at: next.updatedAt,
+      confirmedLive: to === "LIVE" ? Boolean(input.confirmLive) : undefined,
+    });
+    this.notify();
+    return next;
+  }
+
+  /**
+   * Release one declared execution mode of a provider. Same graph and LIVE confirmation as
+   * provider releases; the provider-level release still gates the mode for consumers.
+   */
+  changeExecutionModeRelease(
+    actor: Actor,
+    experienceId: string,
+    mode: ExperienceExecutionMode,
+    input: {
+      releaseState: ExperienceReleaseState;
+      visibility?: ExperienceVisibility;
+      confirmLive?: boolean;
+    },
+  ): CatalogExperienceEntry {
+    const current = this.entries.get(experienceId);
+    if (!current) throw new DomainError("Experience not found in release catalog.", "not_found");
+    const modes = current.executionModes ?? [{ mode: "APP" as const }];
+    const index = modes.findIndex((item) => item.mode === mode);
+    if (index < 0) {
+      throw new DomainError(`${mode} is not a declared execution mode of ${experienceId}.`, "not_found");
+    }
+    const declared = modes[index]!;
+    const from = declared.releaseState ?? current.releaseState;
+    const to = normalizeReleaseState(input.releaseState);
+    if (!releaseTransitionAllowed(from, to)) {
+      throw new DomainError(`Invalid release transition ${from} → ${to}.`, "conflict");
+    }
+    if (to === "LIVE" && !input.confirmLive) {
+      throw new DomainError("Going LIVE requires explicit confirmation (confirmLive: true).");
+    }
+    const visibilityFrom = declared.visibility ?? current.visibility;
+    const visibilityTo = normalizeVisibility(input.visibility ?? visibilityFrom);
+    const nextModes = modes.map((item, position) =>
+      position === index ? { ...item, releaseState: to, visibility: visibilityTo } : item,
+    );
+    const next: CatalogExperienceEntry = {
+      ...current,
+      executionModes: nextModes,
+      updatedAt: new Date().toISOString(),
+    };
+    this.entries.set(experienceId, next);
+    this.manifestVersion += 1;
+    this.audits.unshift({
+      action: "experience.release.changed",
+      experienceId,
+      executionMode: mode,
+      from,
+      to,
+      visibilityFrom,
       visibilityTo,
       actorId: actor.id,
       actorType: actor.role,

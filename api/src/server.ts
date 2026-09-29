@@ -286,6 +286,25 @@ async function route(
     return send(res, 200, await service.listReleaseCatalog(actor));
   }
 
+  const modeReleaseMatch = path.match(/^\/v1\/admin\/releases\/([^/]+)\/modes\/(APP|SPACE)$/);
+  if (modeReleaseMatch && req.method === "POST") {
+    const [, id, mode] = modeReleaseMatch;
+    const body = (await readBody(req)) as Record<string, unknown>;
+    if (typeof body.releaseState !== "string") throw new DomainError("releaseState is required.");
+    return send(
+      res,
+      200,
+      await service.changeExecutionModeRelease(actor, id, mode as "APP" | "SPACE", {
+        releaseState: body.releaseState as import("@digiconomy/xperience-contract").ExperienceReleaseState,
+        visibility:
+          body.visibility === "HIDDEN" || body.visibility === "LISTED" || body.visibility === "FEATURED"
+            ? body.visibility
+            : undefined,
+        confirmLive: body.confirmLive === true,
+      }),
+    );
+  }
+
   const releaseMatch = path.match(/^\/v1\/admin\/releases\/([^/]+)(?:\/(preload|lock|go-live|pause|retire))?$/);
   if (releaseMatch) {
     const [, id, action] = releaseMatch;

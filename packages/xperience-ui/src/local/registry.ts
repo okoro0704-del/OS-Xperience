@@ -62,6 +62,7 @@ export function directoryToRegistryEntry(app: DirectoryApplicationView): Experie
     ...(app.managementUrl ? { managementUrl: app.managementUrl } : {}),
     category: app.category,
     description: app.description,
+    ...(app.executionModes ? { executionModes: app.executionModes } : {}),
   };
 }
 
@@ -69,7 +70,9 @@ export function syncRegistryFromDirectory(apps: DirectoryApplicationView[]): Exp
   const byId = new Map<string, ExperienceRegistryEntry>();
   for (const entry of readRegistry()) byId.set(entry.experienceId, entry);
   for (const app of apps) {
-    byId.set(app.id, directoryToRegistryEntry(app));
+    const previousModes = byId.get(app.id)?.executionModes;
+    const next = directoryToRegistryEntry(app);
+    byId.set(app.id, next.executionModes || !previousModes ? next : { ...next, executionModes: previousModes });
   }
   // Keep bootstrap mybrandOS if directory has no public mybrandOS yet.
   if (![...byId.values()].some(isMybrandPublic)) {
@@ -124,5 +127,6 @@ export function registryToDirectoryView(entry: ExperienceRegistryEntry): Directo
     experienceStatus: "ACTIVE",
     description: entry.description,
     ecosystemSource: "LIFEOS",
+    ...(entry.executionModes ? { executionModes: entry.executionModes } : {}),
   };
 }

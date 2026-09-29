@@ -95,6 +95,8 @@ export interface ExperienceRegistryEntry {
   preloadPolicy?: import("./release.js").PreloadPolicy;
   packageVersion?: string;
   contentHash?: string;
+  /** Absent means APP only. */
+  executionModes?: import("./release.js").CatalogExecutionTarget[];
 }
 
 /**
@@ -111,6 +113,7 @@ export interface ExperienceSlot {
   /** Runtime tier assigned by the Xperience switcher. */
   runtimeTier?: RuntimeTier;
   offlineState?: "ok" | "blocked";
+  executionMode?: import("./release.js").ExperienceExecutionMode;
 }
 
 /** Shell mode — XPERIENCE is consumption; HOME covers Directory / My Experience / Profile. */
@@ -137,6 +140,8 @@ export interface LastExperienceState {
   lastOpenedAt: string;
   surface: ApplicationSurfaceType;
   experienceStateReference?: string;
+  /** Absent on records written before execution modes existed; treated as APP. */
+  executionMode?: import("./release.js").ExperienceExecutionMode;
 }
 
 export interface ApplicationManifestClaim {
@@ -382,6 +387,8 @@ export interface DirectoryApplicationView {
   /** Server release gate — separate from authMode. */
   releaseState?: import("./release.js").ExperienceReleaseState;
   visibility?: import("./release.js").ExperienceVisibility;
+  /** Absent means APP only. */
+  executionModes?: import("./release.js").CatalogExecutionTarget[];
   category: Exclude<DirectoryCategory, "All">;
   capabilities: Capability[];
   publicationState: "PUBLISHED" | "NOT_PUBLISHED";
@@ -629,6 +636,18 @@ export {
   signExperienceCatalog,
   verifyExperienceCatalog,
   assertCatalogReleaseIntegrity,
+  EXPERIENCE_EXECUTION_MODES,
+  normalizeExecutionMode,
+  declaredExecutionModes,
+  resolveExperienceTargets,
+  availableExperienceTargets,
+  findExperienceTarget,
+  withDiscoverableExecutionModes,
+  type ExperienceExecutionMode,
+  type CatalogExecutionTarget,
+  type ExperienceTarget,
+  type ExperienceTargetAvailability,
+  type ExperienceTargetSource,
   type ExperienceReleaseState,
   type ExperienceVisibility,
   type PreloadPolicy,

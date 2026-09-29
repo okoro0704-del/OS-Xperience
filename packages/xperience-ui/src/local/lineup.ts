@@ -19,6 +19,7 @@ export interface LineupEntry {
   authMode: ExperienceRegistryEntry["authMode"];
   offlineCapability: OfflineCapability;
   availability: ExperienceAvailability;
+  executionModes?: ExperienceRegistryEntry["executionModes"];
 }
 
 export function resolveAvailability(
@@ -67,6 +68,7 @@ export function buildLineup(options?: {
           managementUrl: app.managementUrl,
           category: app.category,
           description: app.description,
+          ...(app.executionModes ? { executionModes: app.executionModes } : {}),
         });
       }
       if (!ids.includes(app.id)) ids.push(app.id);
@@ -105,6 +107,7 @@ export function buildLineup(options?: {
       authMode: entry.authMode,
       offlineCapability: entry.offlineCapability,
       availability: resolveAvailability(entry.offlineCapability, online, entry.status),
+      ...(entry.executionModes ? { executionModes: entry.executionModes } : {}),
     });
   }
   return out;

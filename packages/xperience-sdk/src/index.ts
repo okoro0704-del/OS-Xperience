@@ -202,6 +202,19 @@ export function createXperienceApiClient(options: XperienceApiClientOptions) {
         experience: import("@digiconomy/xperience-contract").CatalogExperienceEntry;
         catalog: import("@digiconomy/xperience-contract").SignedExperienceCatalog;
       }>("POST", `/v1/admin/releases/${encodeURIComponent(id)}/${action}`, body ?? {}),
+    releaseExecutionMode: (
+      id: string,
+      mode: import("@digiconomy/xperience-contract").ExperienceExecutionMode,
+      body: {
+        releaseState: import("@digiconomy/xperience-contract").ExperienceReleaseState;
+        visibility?: import("@digiconomy/xperience-contract").ExperienceVisibility;
+        confirmLive?: boolean;
+      },
+    ) =>
+      request<{
+        experience: import("@digiconomy/xperience-contract").CatalogExperienceEntry;
+        catalog: import("@digiconomy/xperience-contract").SignedExperienceCatalog;
+      }>("POST", `/v1/admin/releases/${encodeURIComponent(id)}/modes/${mode}`, body),
     listPresentations: () =>
       request<{ presentations: import("@digiconomy/xperience-contract").PresentationView[] }>(
         "GET",

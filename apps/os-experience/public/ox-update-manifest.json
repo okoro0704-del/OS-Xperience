@@ -1,13 +1,13 @@
 {
-  "nativeVersion": "0.3.4",
-  "nativeBuildNumber": 12,
-  "runtimeVersion": "2026.09.21.3",
+  "nativeVersion": "0.3.5",
+  "nativeBuildNumber": 13,
+  "runtimeVersion": "2026.09.29.1",
   "minimumRuntimeVersion": "2026.09.01.0",
   "minimumNativeVersion": "0.3.0",
   "minimumNativeBuildNumber": 8,
-  "releaseId": "ox-20260921-adec488d7b",
-  "publishedAt": "2026-09-21T23:56:20.872Z",
+  "releaseId": "ox-20260929-2297d207df",
+  "publishedAt": "2026-09-29T09:40:18.297Z",
   "apkUrl": "https://xperience.getlifeos.app/releases/OS-Xperience.apk",
   "runtimeUrl": "https://xperience.getlifeos.app",
-  "notes": "Bundled boot + safe Experience restore fallback (no white WebView error)"
+  "notes": "Dual-Xperience directory: Xperience App and Xperience Space per provider; locked/event mode is explicit"
 }

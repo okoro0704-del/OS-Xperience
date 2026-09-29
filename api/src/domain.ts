@@ -766,6 +766,27 @@ export class XperienceService {
     };
   }
 
+  async changeExecutionModeRelease(
+    actor: Actor,
+    experienceId: string,
+    mode: import("@digiconomy/xperience-contract").ExperienceExecutionMode,
+    input: { releaseState: ExperienceReleaseState; visibility?: ExperienceVisibility; confirmLive?: boolean },
+  ) {
+    this.requireAdmin(actor);
+    const entry = this.releaseCatalog.changeExecutionModeRelease(actor, experienceId, mode, input);
+    const released = entry.executionModes?.find((item) => item.mode === mode);
+    await this.log(
+      "experience.release.changed",
+      actor,
+      experienceId,
+      `${mode}:${released?.releaseState ?? entry.releaseState}/${released?.visibility ?? entry.visibility}`,
+    );
+    return {
+      experience: entry,
+      catalog: await this.releaseCatalog.buildDeviceSignedCatalog(),
+    };
+  }
+
   releaseCatalogPort(): ExperienceReleaseCatalog {
     return this.releaseCatalog;
   }

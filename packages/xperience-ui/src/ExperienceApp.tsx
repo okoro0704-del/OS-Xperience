@@ -5,7 +5,9 @@ import {
   parseExperienceUtterance,
   type ApplicationSurfaceType,
   type DirectoryApplicationView,
+  type ExperienceExecutionMode,
   type ExperienceMembershipView,
+  type ExperienceTarget,
   type OpenExperiencePayload,
 } from "@digiconomy/xperience-contract";
 import {
@@ -16,23 +18,26 @@ import {
 import {
   applyCatalogUpdate,
   applyOnlineDirectory,
+  availableProviderTargets,
   bootFromLocal,
   buildLineup,
   buildLocalOpenPayload,
   canOperateOffline,
   catalogPublicKeySpki,
+  chooseExecutionTarget,
   enterXperienceMode,
+  getExperienceSlot,
   leaveXperienceMode,
   markRevealSeen,
   nextExperienceId,
+  nextProviderWithMode,
   planSwitch,
   previousExperienceId,
   probeExperienceUrl,
-  readLockedKernelMode,
+  providerTargets,
   rememberOpenedExperience,
   shellAuthPosture,
   storeCatalogPublicKey,
-  writeLockedKernelMode,
   type LineupEntry,
 } from "./local/index.js";
 import { ExperienceSwitcher, attachDoubleTap } from "./switcher/index.js";
@@ -72,10 +77,11 @@ import {
   type LaunchTrace,
 } from "./launch-metrics.js";
 import "./styles.css";
-import { MRFUNDZMANOS_EXPERIENCE_ID, lockFrameLineup, localSpaceResult, onlineDeliverableResult, resolveLockedExperience, type LockedKernel, type SpacePresentation } from "./locked-xperience.js";
+import { lockFrameLineup, lockedExecutionMode, lockedProviderId, resolveHostMode, resolveLockedExperience, type LockedExperienceConfig, type SpacePresentation } from "./locked-xperience.js";
 
 declare global {
   interface Window {
+    __oxLockedExperience?: LockedExperienceConfig;
     __oxExperienceActive?: boolean;
     __oxGestureDebug?: (phase: string, count: number, dx?: number, dy?: number) => void;
     __oxExitExperienceToHome?: () => void;
@@ -179,25 +185,33 @@ function Skeletons({ count = 4, home = false }: { count?: number; home?: boolean
   return <div className={`ox-grid ox-skeleton-grid${home ? " ox-home-grid" : ""}`} aria-label="Loading applications">{Array.from({ length: count }, (_, index) => <div className="ox-skeleton" key={index}><i /><b /><span /></div>)}</div>;
 }
 
+const EXECUTION_MODE_LABEL: Record<ExperienceExecutionMode, string> = {
+  APP: "Xperience App",
+  SPACE: "Xperience Space",
+};
+
 function AppCard({
   app,
+  modes,
   onSelect,
   onPrimary,
   busy,
   dense = false,
 }: {
   app: DirectoryApplicationView;
+  modes: ExperienceExecutionMode[];
   onSelect: () => void;
   onPrimary: () => void;
   busy: boolean;
   dense?: boolean;
 }) {
-  return <article className={`ox-app-card${dense ? " is-dense" : ""}`}>
+  return <article className={`ox-app-card${dense ? " is-dense" : ""}`} data-testid={`provider-card-${app.id}`}>
     <button className="ox-card-main" onClick={onSelect} aria-label={`View ${app.name} details`}>
       <AppGlyph app={app} compact={dense} />
       <span>
         <small>{app.category}</small>
         <strong>{app.name}</strong>
+        {modes.length ? <span className="ox-mode-badges" data-testid={`provider-modes-${app.id}`}>{modes.map((mode) => <em key={mode}>{mode}</em>)}</span> : null}
         {!dense ? <p>{app.description || "No description provided."}</p> : null}
       </span>
     </button>
@@ -212,7 +226,7 @@ function AppCard({
         >
           <Icon name="view" />
         </button>
-        <button className="ox-button compact" disabled={busy} onClick={onPrimary}>
+        <button className="ox-button compact" disabled={busy || modes.length === 0} onClick={onPrimary}>
           {busy ? "Working…" : app.experienced ? "Open" : "Xperience"}
         </button>
       </div>
@@ -281,7 +295,16 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const userId = props.userId ?? env?.VITE_XPERIENCE_USER_ID ?? "user-1";
   const userName = props.userName ?? env?.VITE_XPERIENCE_USER_NAME ?? "Member";
   const openExternalUrl = props.openExternalUrl;
-  const lockedExperienceId = env?.VITE_LOCKED_XPERIENCE_ID === "false" ? null : MRFUNDZMANOS_EXPERIENCE_ID;
+  const hostMode = useMemo(() => resolveHostMode({
+    env: {
+      lockedId: env?.VITE_LOCKED_XPERIENCE_ID,
+      lockedMode: env?.VITE_LOCKED_XPERIENCE_MODE,
+      lockedPurpose: env?.VITE_LOCKED_XPERIENCE_PURPOSE,
+    },
+    runtime: typeof window !== "undefined" ? window.__oxLockedExperience ?? null : null,
+  }), []);
+  const lockedExperienceId = lockedProviderId(hostMode);
+  const fixedExecutionMode = lockedExecutionMode(hostMode);
   const api = useMemo<XperienceApiClient>(() => createXperienceApiClient({
     baseUrl: apiBase,
     actor: `USER:${userId}`,
@@ -337,9 +360,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [mountedFrames, setMountedFrames] = useState<
     { id: string; embedUrl: string; name: string }[]
   >([]);
-  const [lockedKernel, setLockedKernel] = useState<LockedKernel>(() => readLockedKernelMode());
+  const [executionMode, setExecutionMode] = useState<ExperienceExecutionMode>("APP");
+  const [catalogRevision, setCatalogRevision] = useState(0);
   const [spacePresentation, setSpacePresentation] = useState<SpacePresentation>("IMMERSIVE");
-  const [deliverableMenuOpen, setDeliverableMenuOpen] = useState(false);
+  const [hostMenuOpen, setHostMenuOpen] = useState(false);
   const [spaceNotice, setSpaceNotice] = useState<string | null>(null);
   const [tvState, setTvState] = useState<"idle" | "preparing" | "playing" | "unavailable">("idle");
   const [tvSource, setTvSource] = useState<string | null>(null);
@@ -353,6 +377,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const switcherIdleRef = useRef<number | null>(null);
   const mountedIdsRef = useRef<string[]>([]);
   const activeIdRef = useRef<string | null>(null);
+  const executionModeRef = useRef<ExperienceExecutionMode>("APP");
   const airNavRef = useRef<AirNavigationController | null>(null);
   const tvUrlRef = useRef<string | null>(null);
   const screenRef = useRef(screen);
@@ -362,10 +387,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
   stackRef.current = screenStack;
   mountedIdsRef.current = mountedFrames.map((frame) => frame.id);
   activeIdRef.current = activeExperienceId;
-
-  useEffect(() => {
-    writeLockedKernelMode(lockedKernel);
-  }, [lockedKernel]);
+  executionModeRef.current = executionMode;
 
   const navigate = useCallback((next: Screen, options?: { replace?: boolean }) => {
     setScreen((current) => {
@@ -440,15 +462,50 @@ export function ExperienceApp(props: ExperienceAppProps) {
       nextLineup: LineupEntry[],
       toId: string,
       fromId: string | null,
-      options?: { offlineMessage?: string | null; app?: DirectoryApplicationView },
+      options?: {
+        offlineMessage?: string | null;
+        app?: DirectoryApplicationView;
+        executionMode?: ExperienceExecutionMode | null;
+      },
     ) => {
       const resolvedToId = resolveLockedExperience(toId, lockedExperienceId);
       if (!resolvedToId) return;
       const lockedLineup = lockFrameLineup(nextLineup, lockedExperienceId);
-      if (!lockedLineup.some((entry) => entry.experienceId === resolvedToId)) {
-        abortExperienceToHome("The configured mrfundzmanOS frame is unavailable on this installation.");
+      const toEntry = lockedLineup.find((entry) => entry.experienceId === resolvedToId);
+      if (!toEntry) {
+        abortExperienceToHome(
+          lockedExperienceId
+            ? "The configured locked Experience is unavailable on this installation."
+            : "That Experience is not available on this installation.",
+        );
         return;
       }
+      const requestedMode =
+        options?.executionMode ??
+        (resolvedToId === activeIdRef.current ? executionModeRef.current : getExperienceSlot(resolvedToId)?.executionMode) ??
+        null;
+      const target = chooseExecutionTarget(
+        providerTargets({
+          id: resolvedToId,
+          entrypoint: toEntry.entrypoint,
+          executionModes: toEntry.executionModes ?? options?.app?.executionModes,
+        }),
+        requestedMode,
+        fixedExecutionMode,
+      );
+      if (!target) {
+        abortExperienceToHome(`${toEntry.name} has no released Xperience mode on this installation.`);
+        return;
+      }
+      const targetChanged = resolvedToId !== activeIdRef.current || target.executionMode !== executionModeRef.current;
+      if (targetChanged) {
+        setTvState("idle");
+        setSpacePresentation("IMMERSIVE");
+        setSpaceNotice(null);
+      }
+      setHostMenuOpen(false);
+      executionModeRef.current = target.executionMode;
+      setExecutionMode(target.executionMode);
       const plan = planSwitch({
         lineup: lockedLineup,
         fromId: resolveLockedExperience(fromId, lockedExperienceId),
@@ -498,8 +555,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
         const next: { id: string; embedUrl: string; name: string }[] = [];
         for (const id of plan.mountedIds) {
           const kept = existing.get(id);
-          if (kept) {
+          if (kept && (id !== resolvedToId || kept.embedUrl === target.entrypoint)) {
             next.push(kept);
+            continue;
+          }
+          if (id === resolvedToId) {
+            next.push({ id, embedUrl: target.entrypoint, name: toEntry.name });
             continue;
           }
           const entry = lockedLineup.find((item) => item.experienceId === id);
@@ -536,11 +597,22 @@ export function ExperienceApp(props: ExperienceAppProps) {
         setFrameReady(plan.fromWarm || plan.sameExperience);
         setFrameFailed(false);
         setLaunchingApp(null);
-        rememberOpenedExperience(payloadApp, "PUBLIC");
+        rememberOpenedExperience(payloadApp, "PUBLIC", undefined, target.executionMode);
       }
       navigate("experience");
     },
-    [abortExperienceToHome, directory, lockedExperienceId, memberships, navigate],
+    [abortExperienceToHome, directory, fixedExecutionMode, lockedExperienceId, memberships, navigate],
+  );
+
+  /** APP ↔ SPACE on the active provider; provider identity and lineup position are unchanged. */
+  const switchExecutionMode = useCallback(
+    (mode: ExperienceExecutionMode) => {
+      const id = activeIdRef.current;
+      if (!id || mode === executionModeRef.current) return;
+      if (fixedExecutionMode && mode !== fixedExecutionMode) return;
+      applyMountPlan(refreshLineup(), id, id, { executionMode: mode });
+    },
+    [applyMountPlan, fixedExecutionMode, refreshLineup],
   );
 
   const switchToExperience = useCallback(
@@ -593,7 +665,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
     try {
       // Local-first: installation identity + registry + restore — no Xperience login.
-      const local = bootFromLocal({ online: isOnline, lockedExperienceId });
+      const local = bootFromLocal({
+        online: isOnline,
+        lockedExperienceId,
+        restoreOnFirstOpen: hostMode.kind === "LOCKED",
+      });
       setDirectory(local.directory);
       setFeatured(local.featured);
       setMemberships(local.memberships);
@@ -604,8 +680,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
       });
       setError(null);
 
-      if (local.restore && !bootRestoreDoneRef.current) {
-        bootRestoreDoneRef.current = true;
+      const bootRestorePending = !bootRestoreDoneRef.current;
+      bootRestoreDoneRef.current = true;
+      if (local.restore && bootRestorePending) {
         try {
           const nextLineup = lockFrameLineup(buildLineup({
             online: isOnline,
@@ -630,7 +707,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
               );
               navigate("home", { replace: true });
             } else {
-              applyMountPlan(nextLineup, local.restore.app.id, null, { app: local.restore.app });
+              applyMountPlan(nextLineup, local.restore.app.id, null, {
+                app: local.restore.app,
+                executionMode: local.restore.executionMode ?? null,
+              });
             }
           } else if (local.restore.offlineBlocked) {
             // Keep shell usable: do not stay on a white iframe — show Home with notice.
@@ -677,6 +757,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
           const applied = await applyCatalogUpdate(catalog, {
             publicKeySpki: publicKey?.publicKeySpkiBase64 ?? catalogPublicKeySpki() ?? undefined,
           });
+          if (applied.ok) setCatalogRevision((value) => value + 1);
           if (applied.ok && applied.newlyLive[0]) {
             const first = applied.newlyLive[0];
             setRevealBanner({ id: first.experienceId, name: first.name });
@@ -717,7 +798,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [api, navigate, props.online, applyMountPlan, refreshLineup, ensureEntrypointReachable, lockedExperienceId]);
+  }, [api, navigate, props.online, applyMountPlan, refreshLineup, ensureEntrypointReachable, lockedExperienceId, hostMode.kind]);
 
   useEffect(() => {
     const poll = () => {
@@ -733,6 +814,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
           await api.getActivePresentation().catch(() => null);
           const catalog = await api.getCatalogManifest();
           const applied = await applyCatalogUpdate(catalog, { publicKeySpki });
+          if (applied.ok) setCatalogRevision((value) => value + 1);
           if (applied.ok && applied.newlyLive[0]) {
             setRevealBanner({
               id: applied.newlyLive[0].experienceId,
@@ -748,9 +830,13 @@ export function ExperienceApp(props: ExperienceAppProps) {
     return () => window.clearInterval(timer);
   }, [api]);
 
+  // load's identity follows directory/lineup state that load itself sets; re-running on identity
+  // change loops forever. Boot once; online recovery and Retry call load explicitly.
+  const loadRef = useRef(load);
+  loadRef.current = load;
   useEffect(() => {
-    void load();
-  }, [load]);
+    void loadRef.current();
+  }, [api]);
 
   useEffect(() => {
     if (typeof props.online === "boolean") {
@@ -1018,7 +1104,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }, [api]);
 
   const openLocalExperience = useCallback(
-    (app: DirectoryApplicationView, surface: ApplicationSurfaceType = "PUBLIC") => {
+    (
+      app: DirectoryApplicationView,
+      surface: ApplicationSurfaceType = "PUBLIC",
+      executionMode?: ExperienceExecutionMode,
+    ) => {
       const posture = shellAuthPosture(app.authMode);
       void posture;
       const nextLineup = refreshLineup([app, ...directory]);
@@ -1043,6 +1133,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         applyMountPlan(nextLineup, app.id, activeIdRef.current, {
           app,
           offlineMessage: null,
+          executionMode: executionMode ?? null,
         });
       })();
       void surface;
@@ -1050,7 +1141,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     [abortExperienceToHome, applyMountPlan, directory, ensureEntrypointReachable, offline, refreshLineup],
   );
 
-  const startApplication = useCallback(async (app: DirectoryApplicationView) => {
+  const startApplication = useCallback(async (app: DirectoryApplicationView, executionMode?: ExperienceExecutionMode) => {
     const trace = beginLaunchTrace(app);
     launchTraceRef.current = trace;
     markLaunch(trace, "identity");
@@ -1068,7 +1159,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     try {
       markLaunch(trace, "request");
       if (offline) {
-        openLocalExperience({ ...app, experienced: true }, "PUBLIC");
+        openLocalExperience({ ...app, experienced: true }, "PUBLIC", executionMode);
         summarizeLaunch(trace);
         return;
       }
@@ -1084,13 +1175,16 @@ export function ExperienceApp(props: ExperienceAppProps) {
         const payload = await api.openExperience(app.id, { surface: "PUBLIC" });
         markLaunch(trace, "response");
         const nextLineup = refreshLineup([{ ...app, experienced: true }]);
-        applyMountPlan(nextLineup, app.id, activeIdRef.current, { app: { ...app, experienced: true } });
+        applyMountPlan(nextLineup, app.id, activeIdRef.current, {
+          app: { ...app, experienced: true },
+          executionMode: executionMode ?? null,
+        });
         // Prefer server embed URL when available without remounting if already warm.
         setOpened(payload);
         setLaunchingApp(null);
         void refreshMemberships();
       } catch {
-        openLocalExperience({ ...app, experienced: true }, "PUBLIC");
+        openLocalExperience({ ...app, experienced: true }, "PUBLIC", executionMode);
       }
       summarizeLaunch(trace);
     } catch (reason) {
@@ -1104,7 +1198,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
     }
   }, [api, refreshMemberships, navigate, offline, openLocalExperience, applyMountPlan, refreshLineup]);
 
-  const openApplication = useCallback(async (app: DirectoryApplicationView, surface: ApplicationSurfaceType = "PUBLIC") => {
+  const openApplication = useCallback(async (
+    app: DirectoryApplicationView,
+    surface: ApplicationSurfaceType = "PUBLIC",
+    executionMode?: ExperienceExecutionMode,
+  ) => {
     if (!app.experienced) {
       setSelected(app);
       navigate("detail");
@@ -1131,7 +1229,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     try {
       markLaunch(trace, "request");
       if (offline || surface === "PUBLIC") {
-        openLocalExperience(app, surface);
+        openLocalExperience(app, surface, executionMode);
         if (!offline) {
           try {
             const payload = await api.openExperience(app.id, { surface });
@@ -1313,13 +1411,33 @@ export function ExperienceApp(props: ExperienceAppProps) {
     }
   }
 
+  const activeProvider = useMemo(
+    () => lineup.find((entry) => entry.experienceId === activeExperienceId) ?? null,
+    [lineup, activeExperienceId],
+  );
+  const activeTargets = useMemo<ExperienceTarget[]>(
+    () => activeExperienceId
+      ? availableProviderTargets({
+          id: activeExperienceId,
+          entrypoint: activeProvider?.entrypoint,
+          executionModes: activeProvider?.executionModes,
+        })
+      : [],
+    // catalogRevision: targets re-resolve when a newly verified signed catalog is stored.
+    [activeExperienceId, activeProvider, catalogRevision],
+  );
+  const activeAppTarget = activeTargets.find((target) => target.executionMode === "APP") ?? null;
+  const activeSpaceTarget = activeTargets.find((target) => target.executionMode === "SPACE") ?? null;
+  const modeSwitchAllowed = !fixedExecutionMode;
+  const tvChannelId = executionMode === "SPACE" ? activeSpaceTarget?.broadcastChannelId ?? null : null;
+
   const openTv = useCallback(async () => {
-    setDeliverableMenuOpen(false); setTvState("preparing"); setSpaceNotice(null);
+    setTvState("preparing"); setSpaceNotice(null);
     const base = (window as Window & { __oxBroadcastApiBase?: string }).__oxBroadcastApiBase ?? (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_MYBRANDOS_PUBLIC_API_BASE;
-    if (!base) { setTvState("unavailable"); return; }
+    if (!base || !tvChannelId) { setTvState("unavailable"); return; }
     try {
       const store = new IndexedDbBroadcastHydrationStore();
-      const result = await hydrateAndPrepareSpaceTv({ channelId: "mrfundzman.tv", routeAvailable: !offline, now: () => new Date(), store, source: createHttpBroadcastSource(base) });
+      const result = await hydrateAndPrepareSpaceTv({ channelId: tvChannelId, routeAvailable: !offline, now: () => new Date(), store, source: createHttpBroadcastSource(base) });
       const playback = result.playback;
       if (!playback || playback.state !== "LOCAL_PLAYING") { setTvState("unavailable"); return; }
       const local = await store.loadMedia(playback.media.mediaId) as (typeof playback.media & { bytes?: Uint8Array });
@@ -1328,7 +1446,28 @@ export function ExperienceApp(props: ExperienceAppProps) {
       if (tvUrlRef.current) URL.revokeObjectURL(tvUrlRef.current);
       tvUrlRef.current = URL.createObjectURL(blob); setTvSource(tvUrlRef.current); setTvTitle(playback.media.title); setTvState("playing");
     } catch { setTvState("unavailable"); }
-  }, [offline]);
+  }, [offline, tvChannelId]);
+
+  const revolveSpace = useCallback(() => {
+    const id = activeIdRef.current;
+    if (!id) return;
+    const nextLineup = refreshLineup();
+    const next = nextProviderWithMode(
+      nextLineup.map((entry) => ({ id: entry.experienceId, entrypoint: entry.entrypoint, executionModes: entry.executionModes })),
+      id,
+      "SPACE",
+    );
+    if (!next) { setSpaceNotice("NO OTHER EXTERNAL SPACES"); return; }
+    applyMountPlan(nextLineup, next.id, id, { executionMode: "SPACE" });
+  }, [applyMountPlan, refreshLineup]);
+
+  const directoryModes = useCallback(
+    (app: DirectoryApplicationView) =>
+      availableProviderTargets({ id: app.id, entrypoint: app.xperienceUrl || app.productionUrl, executionModes: app.executionModes })
+        .map((target) => target.executionMode),
+    [catalogRevision],
+  );
+  const selectedModes = selected ? directoryModes(selected) : [];
 
   useEffect(() => () => { if (tvUrlRef.current) URL.revokeObjectURL(tvUrlRef.current); }, []);
 
@@ -1372,7 +1511,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     ? <Skeletons count={options?.home ? 4 : 6} home={options?.home} />
     : apps.length === 0
     ? <div className="ox-inline-empty"><p>No applications match this view.</p></div>
-    : <div className={`ox-grid${options?.home ? " ox-home-grid" : ""}${options?.dense ? " ox-dense-grid" : ""}`}>{apps.map((app) => <AppCard key={app.id} app={app} dense={Boolean(options?.home || options?.dense)} busy={busyId === app.id} onSelect={() => {
+    : <div className={`ox-grid${options?.home ? " ox-home-grid" : ""}${options?.dense ? " ox-dense-grid" : ""}`}>{apps.map((app) => <AppCard key={app.id} app={app} modes={directoryModes(app)} dense={Boolean(options?.home || options?.dense)} busy={busyId === app.id} onSelect={() => {
       const scroller = mainScrollRef.current;
       if (scroller && (screen === "directory" || screen === "search" || screen === "home")) {
         directoryScrollRef.current = scroller.scrollTop;
@@ -1525,23 +1664,25 @@ export function ExperienceApp(props: ExperienceAppProps) {
             ) : null}
           </dl>
           <div className="ox-detail-actions">
-            {!selected.experienced ? (
+            {selectedModes.length === 0 ? (
+              <p className="ox-empty-copy" data-testid="provider-not-released">No Xperience mode is released for this provider yet.</p>
+            ) : null}
+            {selectedModes.map((mode, index) => (
               <button
-                className="ox-button primary wide"
+                key={mode}
+                type="button"
+                className={`ox-button ${index === 0 ? "primary" : "secondary"} wide`}
+                data-testid={`xperience-target-${selected.id}-${mode.toLowerCase()}`}
                 disabled={busyId === selected.id}
-                onClick={() => void startApplication(selected)}
+                onClick={() => void (selected.experienced
+                  ? openApplication(selected, "PUBLIC", mode)
+                  : startApplication(selected, mode))}
               >
-                {busyId === selected.id ? "Opening…" : "Xperience"}
+                {busyId === selected.id ? "Opening…" : EXECUTION_MODE_LABEL[mode]}
               </button>
-            ) : (
+            ))}
+            {selected.experienced ? (
               <>
-                <button
-                  className="ox-button primary wide"
-                  disabled={busyId === selected.id}
-                  onClick={() => void openApplication(selected, "PUBLIC")}
-                >
-                  {busyId === selected.id ? "Opening…" : "Open"}
-                </button>
                 {selected.canManage ? (
                   <button
                     type="button"
@@ -1563,7 +1704,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
                   Remove from My Xperience
                 </button>
               </>
-            )}
+            ) : null}
           </div>
         </section>
       </div> : screen === "detail" ? <div className="ox-screen ox-detail"><BackButton /><div className="ox-inline-empty"><p>Select an application from Directory.</p></div></div> : null}
@@ -1687,24 +1828,33 @@ export function ExperienceApp(props: ExperienceAppProps) {
             ref={immersiveRef}
             data-testid="in-app-experience"
             data-xperience-mode="XPERIENCE"
+            data-execution-mode={executionMode}
+            data-provider-id={activeExperienceId ?? undefined}
+            data-host-mode={hostMode.kind}
             data-switcher-open={switcherOpen ? "1" : "0"}
             className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}${airGrabbed ? " is-grabbed" : ""}${navProgress > 0.02 ? " is-nav-dragging" : ""}`}
           >
-            {lockedKernel === "APP" ? <>
-              <button type="button" className="ox-deliverable-trigger" aria-label="mrfundzmanOS deliverables" onClick={() => setDeliverableMenuOpen((open) => !open)}>☰</button>
-              {deliverableMenuOpen ? <div className="ox-deliverable-menu" role="menu">
-                {["App", "News", "Digipedia", "TV", "Radio"].map((item) => <button key={item} type="button" role="menuitem" onClick={() => item === "TV" ? void openTv() : setSpaceNotice(onlineDeliverableResult(!offline) === "ONLINE_REQUIRED" ? "ONLINE_REQUIRED" : `${item} is available through the Online Kernel.`)}>{item}</button>)}
-                <button type="button" role="menuitem" onClick={() => { setLockedKernel("SPACE"); setSpacePresentation("IMMERSIVE"); setDeliverableMenuOpen(false); }}>Space</button>
+            {executionMode === "APP" ? <>
+              <button type="button" className="ox-deliverable-trigger" aria-label="Xperience controls" data-testid="xperience-host-controls" aria-expanded={hostMenuOpen} onClick={() => setHostMenuOpen((open) => !open)}>☰</button>
+              {hostMenuOpen ? <div className="ox-deliverable-menu" role="menu" aria-label="Xperience controls">
+                {modeSwitchAllowed && activeSpaceTarget ? <button type="button" role="menuitem" data-testid="switch-to-space" onClick={() => switchExecutionMode("SPACE")}>{EXECUTION_MODE_LABEL.SPACE}</button> : null}
+                {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); openSwitcher(); }}>Switch provider</button> : null}
+                {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); exitExperienceToHome(); }}>Leave Xperience</button> : null}
               </div> : null}
             </> : <>
               <button type="button" className="ox-space-summon" onClick={() => setSpacePresentation("CONTROLS_VISIBLE")}>Summon controls</button>
-              {spacePresentation !== "IMMERSIVE" ? <div className="ox-space-controls"><button onClick={() => void openTv()}>TV</button><button onClick={() => setSpaceNotice(localSpaceResult(true))}>Space Switch</button><button onClick={() => setSpaceNotice("NO OTHER EXTERNAL SPACES")}>Revolve</button><button onClick={() => setLockedKernel("APP")}>Return to App</button></div> : null}
+              {spacePresentation !== "IMMERSIVE" ? <div className="ox-space-controls" data-testid="space-controls">
+                {tvChannelId ? <button type="button" onClick={() => void openTv()}>TV</button> : null}
+                <button type="button" onClick={openSwitcher}>Space Switch</button>
+                <button type="button" onClick={revolveSpace}>Revolve</button>
+                {modeSwitchAllowed && activeAppTarget ? <button type="button" data-testid="switch-to-app" onClick={() => switchExecutionMode("APP")}>Return to App</button> : null}
+              </div> : null}
             </>}
             {spaceNotice ? <div className="ox-frame-note" role="status">{spaceNotice}</div> : null}
-            {tvState !== "idle" ? <section className="ox-tv-surface" data-testid="mrfundzman-tv">
+            {executionMode === "SPACE" && tvState !== "idle" ? <section className="ox-tv-surface" data-testid="space-tv" data-channel={tvChannelId ?? undefined}>
               {tvState === "preparing" ? <div role="status">Preparing broadcast...</div> : null}
               {tvState === "unavailable" ? <div role="status">Broadcast unavailable</div> : null}
-              {tvState === "playing" && tvSource ? <><small>MRFUNDZMAN TV</small><strong>{tvTitle}</strong><video data-testid="mrfundzman-tv-video" src={tvSource} autoPlay muted playsInline controls onLoadedMetadata={(event) => { const video = event.currentTarget; void video.play().catch(() => undefined); }} /></> : null}
+              {tvState === "playing" && tvSource ? <><small>{tvChannelId}</small><strong data-testid="space-tv-title">{tvTitle}</strong><video data-testid="space-tv-video" src={tvSource} autoPlay muted playsInline controls onLoadedMetadata={(event) => { const video = event.currentTarget; void video.play().catch(() => undefined); }} /></> : null}
             </section> : null}
             <div
               ref={switcherEdgeLeftRef}
@@ -1826,6 +1976,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
               onNext={switchNext}
               onPrevious={switchPrevious}
               onDismiss={dismissSwitcher}
+              activeMode={executionMode}
+              activeModes={activeTargets.map((target) => target.executionMode)}
+              modeSwitchAllowed={modeSwitchAllowed}
+              onSelectMode={(mode) => { switchExecutionMode(mode); dismissSwitcher(); }}
+              modesFor={(id) => {
+                const entry = lineup.find((item) => item.experienceId === id);
+                return availableProviderTargets({ id, entrypoint: entry?.entrypoint, executionModes: entry?.executionModes })
+                  .map((target) => target.executionMode);
+              }}
             />
           </div>
         </>
