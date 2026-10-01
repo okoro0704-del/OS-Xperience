@@ -25,6 +25,7 @@ import {
   canOperateOffline,
   catalogPublicKeySpki,
   chooseExecutionTarget,
+  directoryRecordId,
   enterXperienceMode,
   getExperienceSlot,
   leaveXperienceMode,
@@ -36,6 +37,8 @@ import {
   probeExperienceUrl,
   providerTargets,
   rememberOpenedExperience,
+  resolveDirectoryProviders,
+  resolveMemberships,
   shellAuthPosture,
   storeCatalogPublicKey,
   type LineupEntry,
@@ -98,6 +101,8 @@ export interface ExperienceAppProps {
   openExternalUrl?: (url: string) => void | Promise<void>;
   /** Optional online/offline signal from the native shell. */
   online?: boolean | null;
+  /** Host's generated runtime version stamp, recorded on the local installation. */
+  runtimeVersion?: string;
 }
 
 type Screen =
@@ -190,6 +195,25 @@ const EXECUTION_MODE_LABEL: Record<ExperienceExecutionMode, string> = {
   SPACE: "Xperience Space",
 };
 
+/** A live record bound to a trusted provider never relocates it: the public destination stays the trusted entrypoint. */
+function trustedOpenPayload(payload: OpenExperiencePayload, app: DirectoryApplicationView): OpenExperiencePayload {
+  if (directoryRecordId(app.id) === app.id || payload.surface !== "PUBLIC") return payload;
+  return { ...payload, applicationId: app.id, origin: app.origin, embedUrl: app.xperienceUrl || app.productionUrl };
+}
+
+/** Why a provider that is not in the lineup cannot run, from the same admission rule the Directory shows. */
+function notAdmittedNotice(providerId: string, name: string | undefined): string {
+  const targets = providerTargets({ id: providerId });
+  const label = name || "That Experience";
+  if (targets.some((target) => target.availability === "NOT_LISTED")) {
+    return `${label} is not listed for OS Xperience on this installation.`;
+  }
+  if (targets.length > 0 && targets.every((target) => target.availability === "NOT_RELEASED")) {
+    return `${label} is listed in the Directory but has not been released for OS Xperience on this installation.`;
+  }
+  return "That Experience is not available on this installation.";
+}
+
 function AppCard({
   app,
   modes,
@@ -211,7 +235,9 @@ function AppCard({
       <span>
         <small>{app.category}</small>
         <strong>{app.name}</strong>
-        {modes.length ? <span className="ox-mode-badges" data-testid={`provider-modes-${app.id}`}>{modes.map((mode) => <em key={mode}>{mode}</em>)}</span> : null}
+        {modes.length
+          ? <span className="ox-mode-badges" data-testid={`provider-modes-${app.id}`}>{modes.map((mode) => <em key={mode}>{mode}</em>)}</span>
+          : <span className="ox-mode-badges" data-testid={`provider-not-released-${app.id}`}><em>NOT RELEASED</em></span>}
         {!dense ? <p>{app.description || "No description provided."}</p> : null}
       </span>
     </button>
@@ -476,7 +502,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         abortExperienceToHome(
           lockedExperienceId
             ? "The configured locked Experience is unavailable on this installation."
-            : "That Experience is not available on this installation.",
+            : notAdmittedNotice(resolvedToId, options?.app?.name ?? directory.find((item) => item.id === resolvedToId)?.name),
         );
         return;
       }
@@ -619,8 +645,13 @@ export function ExperienceApp(props: ExperienceAppProps) {
     (experienceId: string) => {
       const nextLineup = refreshLineup();
       void (async () => {
-        if (!mountedIdsRef.current.includes(experienceId)) {
-          const entry = nextLineup.find((item) => item.experienceId === experienceId);
+        const entry = nextLineup.find((item) => item.experienceId === experienceId);
+        const planned = chooseExecutionTarget(
+          providerTargets({ id: experienceId, entrypoint: entry?.entrypoint, executionModes: entry?.executionModes }),
+          getExperienceSlot(experienceId)?.executionMode ?? null,
+          fixedExecutionMode,
+        );
+        if (!mountedIdsRef.current.includes(experienceId) && planned?.executionMode !== "SPACE") {
           const probe = await ensureEntrypointReachable(entry?.entrypoint);
           if (!probe.ok) {
             abortExperienceToHome(
@@ -633,7 +664,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         dismissSwitcher();
       })();
     },
-    [abortExperienceToHome, applyMountPlan, dismissSwitcher, ensureEntrypointReachable, refreshLineup],
+    [abortExperienceToHome, applyMountPlan, dismissSwitcher, ensureEntrypointReachable, fixedExecutionMode, refreshLineup],
   );
 
   const switchNext = useCallback(() => {
@@ -669,6 +700,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         online: isOnline,
         lockedExperienceId,
         restoreOnFirstOpen: hostMode.kind === "LOCKED",
+        runtimeVersion: props.runtimeVersion,
       });
       setDirectory(local.directory);
       setFeatured(local.featured);
@@ -693,7 +725,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
           setExperienceOfflineMessage(local.restore.offlineBlocked ? (local.restore.offlineMessage ?? null) : null);
           setLaunchingApp(local.restore.app);
           if (local.restore.payload && !local.restore.offlineBlocked) {
-            const probe = isOnline ? await ensureEntrypointReachable(local.restore.payload.embedUrl) : { ok: true as const };
+            const restoreTarget = chooseExecutionTarget(
+              providerTargets({ id: local.restore.app.id, entrypoint: local.restore.payload.embedUrl }),
+              local.restore.executionMode ?? null,
+              fixedExecutionMode,
+            );
+            // A prepared Space restores without its provider's APP origin answering.
+            const probe = isOnline && restoreTarget?.executionMode !== "SPACE"
+              ? await ensureEntrypointReachable(local.restore.payload.embedUrl)
+              : { ok: true as const };
             if (!probe.ok) {
               console.warn("[ox-boot] Experience restore unreachable — falling back to Home", probe.reason);
               leaveXperienceMode();
@@ -763,17 +803,21 @@ export function ExperienceApp(props: ExperienceAppProps) {
             setRevealBanner({ id: first.experienceId, name: first.name });
           }
         }
-        applyOnlineDirectory(directoryResult.applications, membershipResult.experiences);
-        setDirectory(directoryResult.applications);
-        setFeatured(featuredResult.applications);
-        setMemberships(membershipResult.experiences);
+        // Resolved after the catalog update so live records bind to the freshly verified release.
+        const providers = resolveDirectoryProviders(directoryResult.applications);
+        const featuredProviders = resolveDirectoryProviders(featuredResult.applications, { includeUnlistedTrusted: false });
+        const providerMemberships = resolveMemberships(membershipResult.experiences);
+        applyOnlineDirectory(providers, providerMemberships);
+        setDirectory(providers);
+        setFeatured(featuredProviders);
+        setMemberships(providerMemberships);
         refreshLineup([
-          ...membershipResult.experiences.map((item) => item.application),
-          ...directoryResult.applications,
+          ...providerMemberships.map((item) => item.application),
+          ...providers,
         ]);
         preconnectOrigins([
-          ...directoryResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
-          ...featuredResult.applications.map((a) => a.xperienceUrl || a.productionUrl),
+          ...providers.map((a) => a.xperienceUrl || a.productionUrl),
+          ...featuredProviders.map((a) => a.xperienceUrl || a.productionUrl),
         ]);
         // Optional profile enrichment — never gates shell entry.
         try {
@@ -798,7 +842,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     } finally {
       setLoading(false);
     }
-  }, [api, navigate, props.online, applyMountPlan, refreshLineup, ensureEntrypointReachable, lockedExperienceId, hostMode.kind]);
+  }, [api, navigate, props.online, applyMountPlan, refreshLineup, ensureEntrypointReachable, lockedExperienceId, fixedExecutionMode, hostMode.kind]);
 
   useEffect(() => {
     const poll = () => {
@@ -1091,16 +1135,18 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
   const refreshMemberships = useCallback(async () => {
     const [directoryResult, membershipResult] = await Promise.all([api.listDirectory(), api.listMyExperience()]);
-    setDirectory(directoryResult.applications);
-    setMemberships(membershipResult.experiences);
-    setFeatured((current) => current.map((app) => directoryResult.applications.find((fresh) => fresh.id === app.id) ?? app));
-    setSelected((current) => current ? directoryResult.applications.find((fresh) => fresh.id === current.id) ?? current : null);
+    const providers = resolveDirectoryProviders(directoryResult.applications);
+    setDirectory(providers);
+    setMemberships(resolveMemberships(membershipResult.experiences));
+    setFeatured((current) => current.map((app) => providers.find((fresh) => fresh.id === app.id) ?? app));
+    setSelected((current) => current ? providers.find((fresh) => fresh.id === current.id) ?? current : null);
   }, [api]);
 
   const findApplication = useCallback(async (query: string) => {
     const result = await api.listDirectory({ q: query });
+    const matches = resolveDirectoryProviders(result.applications, { includeUnlistedTrusted: false });
     const normalized = query.trim().toLowerCase();
-    return result.applications.find((app) => app.name.toLowerCase() === normalized) ?? result.applications[0] ?? null;
+    return matches.find((app) => app.name.toLowerCase() === normalized) ?? matches[0] ?? null;
   }, [api]);
 
   const openLocalExperience = useCallback(
@@ -1114,6 +1160,24 @@ export function ExperienceApp(props: ExperienceAppProps) {
       const nextLineup = refreshLineup([app, ...directory]);
       const online = !offline;
       const gate = canOperateOffline(app.offlineCapability, online);
+      const target = chooseExecutionTarget(
+        providerTargets({ id: app.id, entrypoint: app.xperienceUrl || app.productionUrl, executionModes: app.executionModes }),
+        executionMode ?? getExperienceSlot(app.id)?.executionMode ?? null,
+        fixedExecutionMode,
+      );
+      if (!target) {
+        abortExperienceToHome(notAdmittedNotice(app.id, app.name));
+        return;
+      }
+      if (target.executionMode === "SPACE") {
+        // SPACE is continuity-first: readiness is the provider's local preparation, never APP reachability.
+        if (!gate.ok) {
+          abortExperienceToHome(`${app.name} Space is not prepared for offline use on this installation.`);
+          return;
+        }
+        applyMountPlan(nextLineup, app.id, activeIdRef.current, { app, offlineMessage: null, executionMode: "SPACE" });
+        return;
+      }
       if (!gate.ok) {
         abortExperienceToHome(
           gate.reason ??
@@ -1133,12 +1197,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
         applyMountPlan(nextLineup, app.id, activeIdRef.current, {
           app,
           offlineMessage: null,
-          executionMode: executionMode ?? null,
+          executionMode: "APP",
         });
       })();
       void surface;
     },
-    [abortExperienceToHome, applyMountPlan, directory, ensureEntrypointReachable, offline, refreshLineup],
+    [abortExperienceToHome, applyMountPlan, directory, ensureEntrypointReachable, fixedExecutionMode, offline, refreshLineup],
   );
 
   const startApplication = useCallback(async (app: DirectoryApplicationView, executionMode?: ExperienceExecutionMode) => {
@@ -1165,14 +1229,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
       }
       if (!app.experienced) {
         try {
-          await api.startExperience(app.id);
+          await api.startExperience(directoryRecordId(app.id));
         } catch {
           /* local open still allowed for PUBLIC / offline-capable */
         }
       }
       markLaunch(trace, "destination");
       try {
-        const payload = await api.openExperience(app.id, { surface: "PUBLIC" });
+        const payload = await api.openExperience(directoryRecordId(app.id), { surface: "PUBLIC" });
         markLaunch(trace, "response");
         const nextLineup = refreshLineup([{ ...app, experienced: true }]);
         applyMountPlan(nextLineup, app.id, activeIdRef.current, {
@@ -1180,7 +1244,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
           executionMode: executionMode ?? null,
         });
         // Prefer server embed URL when available without remounting if already warm.
-        setOpened(payload);
+        setOpened(trustedOpenPayload(payload, app));
         setLaunchingApp(null);
         void refreshMemberships();
       } catch {
@@ -1232,8 +1296,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
         openLocalExperience(app, surface, executionMode);
         if (!offline) {
           try {
-            const payload = await api.openExperience(app.id, { surface });
-            setOpened(payload);
+            const payload = await api.openExperience(directoryRecordId(app.id), { surface });
+            setOpened(trustedOpenPayload(payload, app));
           } catch {
             /* local mount already active */
           }
@@ -1243,7 +1307,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         return;
       }
       try {
-        const payload = await api.openExperience(app.id, { surface });
+        const payload = await api.openExperience(directoryRecordId(app.id), { surface });
         markLaunch(trace, "response");
         markLaunch(trace, "destination");
         setOpened(payload);
@@ -1401,7 +1465,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     if (!stopTarget) return;
     setBusyId(stopTarget.applicationId);
     try {
-      await api.stopExperience(stopTarget.applicationId);
+      await api.stopExperience(directoryRecordId(stopTarget.applicationId));
       setStopTarget(null);
       await refreshMemberships();
     } catch (reason) {
@@ -1665,7 +1729,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
           </dl>
           <div className="ox-detail-actions">
             {selectedModes.length === 0 ? (
-              <p className="ox-empty-copy" data-testid="provider-not-released">No Xperience mode is released for this provider yet.</p>
+              <p className="ox-empty-copy" data-testid="provider-not-released">Listed in the Directory. No Xperience mode has been released for this provider on this installation yet.</p>
             ) : null}
             {selectedModes.map((mode, index) => (
               <button
@@ -1915,7 +1979,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 </button>
               </section>
             ) : null}
-            {frameFailed && opened && !experienceOfflineMessage ? (
+            {frameFailed && executionMode === "SPACE" && !experienceOfflineMessage ? (
+              <div className="ox-frame-note" role="status" data-testid="space-provider-unreachable">
+                The live provider page is unreachable. This Space continues on this installation.
+              </div>
+            ) : null}
+            {frameFailed && executionMode === "APP" && opened && !experienceOfflineMessage ? (
               <section className="ox-frame-fallback ox-immersive-fallback" data-testid="experience-frame-failed">
                 <h1>{opened.name} couldn&apos;t open</h1>
                 <p>The Experience page failed to load. OS Xperience Home is still available.</p>

@@ -5,7 +5,7 @@ import {
   type ExperienceTarget,
 } from "@digiconomy/xperience-contract";
 import { MYBRANDOS_PUBLIC_ID, bootstrapPublicEntry } from "./bootstrap.js";
-import { readSignedCatalog } from "./catalog.js";
+import { readSignedCatalog, signedCatalogGovernsExecution } from "./catalog.js";
 import { findRegistryEntry } from "./registry.js";
 
 export interface ProviderRef {
@@ -25,15 +25,19 @@ function declaredModes(provider: ProviderRef): CatalogExecutionTarget[] | undefi
 
 /**
  * All declared (provider, mode) targets. A verified signed catalog entry is authoritative for
- * release, visibility and modes; local registry data is used only when the catalog has no entry.
+ * release, visibility and modes. Local registry data is used only when no governing catalog exists;
+ * under a governing catalog a provider it does not carry is NOT_RELEASED — the same rule the lineup applies.
  */
 export function providerTargets(provider: ProviderRef): ExperienceTarget[] {
   const entrypoint = provider.entrypoint || findRegistryEntry(provider.id)?.entrypoint || "";
-  const catalogEntry = readSignedCatalog()?.payload.experiences.find((item) => item.experienceId === provider.id);
+  const catalog = readSignedCatalog();
+  const catalogEntry = catalog?.payload.experiences.find((item) => item.experienceId === provider.id);
   if (catalogEntry) {
     return resolveExperienceTargets({ ...catalogEntry, entrypoint: entrypoint || catalogEntry.entrypoint });
   }
-  return resolveExperienceTargets({ experienceId: provider.id, entrypoint, executionModes: declaredModes(provider) });
+  const declared = resolveExperienceTargets({ experienceId: provider.id, entrypoint, executionModes: declaredModes(provider) });
+  if (!signedCatalogGovernsExecution(catalog)) return declared;
+  return declared.map((target) => ({ ...target, availability: "NOT_RELEASED" as const }));
 }
 
 export function availableProviderTargets(provider: ProviderRef): ExperienceTarget[] {

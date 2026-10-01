@@ -1,0 +1,15 @@
+{
+  "applicationId": "com.digiconomy.osexperience",
+  "keyAlias": "os-xperience",
+  "certificateSubject": "CN=OS Xperience, O=Digiconomy",
+  "certificateIssuer": "CN=OS Xperience, O=Digiconomy",
+  "certificateSerial": "9182c8d53c1ff8a4",
+  "certificateSha256": "bd6461e09a3f7f76b08aa42b1d18d81cc3a043e0659a8193a1bf6fe176d259a0",
+  "signatureAlgorithm": "SHA384withRSA",
+  "publicKey": "RSA 4096",
+  "validFrom": "2026-10-01T10:40:12Z",
+  "validUntil": "2054-02-16T10:40:12Z",
+  "firstProductionVersion": "0.3.6",
+  "firstProductionVersionCode": 14,
+  "policy": "All future Android releases for this package must use this certificate. Builds 12 and 13 were Android Debug signed (8e5eb29468beea2d36135b8500c376e493277a97140a69d1688bd3ea4cf336aa); installs of those builds need a one-time uninstall before installing build 14."
+}

@@ -9,7 +9,7 @@ import {
   type OxUpdateDecision,
   type OxUpdateManifest,
 } from "@digiconomy/xperience-contract";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import {
   OX_NATIVE_BUILD_NUMBER,
   OX_NATIVE_VERSION,
@@ -17,8 +17,8 @@ import {
   OX_RUNTIME_VERSION,
 } from "./ox-version-stamp.js";
 import { openExternalUrl } from "./native-bridge.js";
+import { manifestUrls as orderedManifestUrls } from "./update-sources.js";
 
-const MANIFEST_PATH = "/ox-update-manifest.json";
 const DISMISS_NATIVE_KEY = "ox.update.native-dismissed.releaseId";
 
 export async function readInstalledVersions(): Promise<OxInstalledVersions> {
@@ -45,20 +45,28 @@ export async function readInstalledVersions(): Promise<OxInstalledVersions> {
 }
 
 export function manifestUrls(): string[] {
-  const urls: string[] = [];
-  try {
-    urls.push(new URL(MANIFEST_PATH, window.location.origin).href);
-  } catch {
-    /* ignore */
-  }
-  if (OX_RUNTIME_URL) {
-    urls.push(`${OX_RUNTIME_URL.replace(/\/$/, "")}${MANIFEST_PATH}`);
-  }
-  return [...new Set(urls)];
+  return orderedManifestUrls(
+    OX_RUNTIME_URL,
+    typeof window !== "undefined" ? window.location.origin : null,
+  );
+}
+
+/** WebView origin is https://localhost; native HTTP avoids CORS on the hosted manifest. */
+const nativeManifestFetch: typeof fetch = async (input) => {
+  const response = await CapacitorHttp.get({
+    url: String(input),
+    headers: { "Cache-Control": "no-cache" },
+  });
+  const body = typeof response.data === "string" ? response.data : JSON.stringify(response.data);
+  return new Response(body, { status: response.status, headers: response.headers });
+};
+
+function defaultManifestFetch(): typeof fetch {
+  return Capacitor.isNativePlatform() ? nativeManifestFetch : fetch;
 }
 
 export async function fetchOxUpdateManifest(
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = defaultManifestFetch(),
 ): Promise<OxUpdateManifest | null> {
   for (const url of manifestUrls()) {
     try {
@@ -76,7 +84,7 @@ export async function fetchOxUpdateManifest(
 }
 
 export async function checkOxUpdates(
-  fetchImpl: typeof fetch = fetch,
+  fetchImpl: typeof fetch = defaultManifestFetch(),
 ): Promise<OxUpdateDecision> {
   const installed = await readInstalledVersions();
   const manifest = await fetchOxUpdateManifest(fetchImpl);

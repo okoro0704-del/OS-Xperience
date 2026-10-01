@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { extname, join, resolve } from "node:path";
 import test from "node:test";
 import type { BrowserContext, Page } from "playwright";
+import { exportGeneratedCatalogKeysForTests, resetCatalogSigningKeysForTests } from "../src/catalog-keys.js";
+import { resetReleaseCatalogForTests } from "../src/release-catalog.js";
 
 const fixtures = "C:\\Users\\Hp\\Desktop\\MRFUNDZMAN-TV-ACCEPTANCE";
 const videoA = { file: "RCTH2872.MOV", canonicalMediaId: "content:sha256:e1d41422304fcce946c6640d07999c41f499c340ba4f935166e656ae9e9d774e" };
@@ -108,6 +110,55 @@ async function serveDist() {
   });
 }
 
+const XPERIENCE_API = /^https:\/\/xperience-api-production-37ee\.up\.railway\.app\//;
+const HOSTED_RUNTIME = /^https:\/\/xperience\.getlifeos\.app\//;
+const PRODUCTION_PROVIDERS = /^https:\/\/(mrfundzman|app)\.getlifeos\.app\//;
+
+type LiveRecord = { id: string; name: string; origin: string; productionUrl: string } & Record<string, unknown>;
+type LiveDirectory = { applications: LiveRecord[]; featured: LiveRecord[]; catalog: unknown; publicKeySpkiBase64: string };
+
+/** Production hosts are never contacted. The Xperience API is unreachable unless a live Directory is supplied. */
+async function hermetic(context: BrowserContext, live?: LiveDirectory) {
+  const calls: string[] = [];
+  await context.route(HOSTED_RUNTIME, (route) => route.abort("internetdisconnected"));
+  await context.route(PRODUCTION_PROVIDERS, (route) => route.abort("internetdisconnected"));
+  await context.route(XPERIENCE_API, async (route) => {
+    const request = route.request();
+    const method = request.method();
+    const { pathname } = new URL(request.url());
+    if (method !== "OPTIONS") calls.push(`${method} ${pathname}`);
+    if (!live) return route.abort("internetdisconnected");
+    const headers = {
+      "access-control-allow-origin": "*",
+      "access-control-allow-headers": "*",
+      "access-control-allow-methods": "GET,POST,DELETE,OPTIONS",
+      "content-type": "application/json",
+    };
+    const reply = (body: unknown, status = 200) => route.fulfill({ status, headers, body: JSON.stringify(body) });
+    if (method === "OPTIONS") return route.fulfill({ status: 204, headers });
+    const record = (id: string) => live.applications.find((app) => app.id === decodeURIComponent(id));
+    if (pathname === "/v1/directory") return reply({ applications: live.applications });
+    if (pathname === "/v1/directory/featured") return reply({ applications: live.featured });
+    if (pathname === "/v1/experience" && method === "GET") return reply({ experiences: [] });
+    if (pathname === "/v1/catalog/manifest") return reply(live.catalog);
+    if (pathname === "/v1/catalog/public-key") return reply({ algorithm: "Ed25519", publicKeySpkiBase64: live.publicKeySpkiBase64 });
+    if (pathname === "/v1/presentation/active") return reply({ presentation: null });
+    if (pathname === "/v1/me") return reply({ id: "user-1", role: "PARTICIPANT" });
+    const open = pathname.match(/^\/v1\/experience\/([^/]+)\/open$/);
+    if (open && record(open[1]!)) {
+      const app = record(open[1]!)!;
+      return reply({ applicationId: app.id, name: app.name, origin: app.origin, embedUrl: app.productionUrl, surface: "PUBLIC", status: "ACTIVE" });
+    }
+    const start = pathname.match(/^\/v1\/experience\/([^/]+)$/);
+    if (start && method === "POST" && record(start[1]!)) {
+      const app = record(start[1]!)!;
+      return reply({ applicationId: app.id, status: "ACTIVE", addedAt: new Date().toISOString(), application: app });
+    }
+    return reply({ error: { code: "NOT_FOUND", message: "not found" } }, 404);
+  });
+  return calls;
+}
+
 async function openHost(
   context: BrowserContext,
   ports: { xperience: number; bootstrap: number; broadcast: number },
@@ -195,6 +246,7 @@ for (const profile of profiles) test(`dual-xperience directory acceptance on ${p
   const ports = { xperience: xperience.port, bootstrap: bootstrap.port, broadcast: broadcast.port };
   const profileDir = await mkdtemp(join(tmpdir(), "ox-dual-"));
   let context = await chromium.launchPersistentContext(profileDir, { headless: true, ...profile });
+  await hermetic(context);
   try {
     const { page, external } = await openHost(context, ports);
 
@@ -278,6 +330,7 @@ for (const profile of profiles) test(`dual-xperience directory acceptance on ${p
 
     // E — NO_ROUTE: producer gone; continuity reopens the same provider in SPACE and TV plays from local media only.
     context = await chromium.launchPersistentContext(profileDir, { headless: true, ...profile });
+    await hermetic(context);
     const offline = await openHost(context, ports);
     await expectTarget(offline.page, "SPACE");
     const stored = await persistedBroadcast(offline.page);
@@ -314,6 +367,7 @@ test("locked mode stays available and distinct from general mode", async (t) => 
     dirs.push(dir);
     const context = await chromium.launchPersistentContext(dir, { headless: true, viewport: { width: 1440, height: 900 } });
     contexts.push(context);
+    await hermetic(context);
     return context;
   };
   try {
@@ -350,5 +404,191 @@ test("locked mode stays available and distinct from general mode", async (t) => 
     await close(bootstrap.server);
     await close(xperience.server);
     for (const dir of dirs) await rm(dir, { recursive: true, force: true });
+  }
+});
+
+/** Shape of the production /v1/directory records observed for MrFundzMan and other LifeOS providers. */
+function liveRecord(id: string, name: string, origin: string): LiveRecord {
+  return {
+    id,
+    name,
+    version: "live",
+    origin,
+    productionUrl: `${origin}/`,
+    xperienceUrl: `${origin}/`,
+    canManage: false,
+    authMode: "PUBLIC",
+    offlineCapability: "NONE",
+    category: "Finance",
+    description: `${name} from the live Directory`,
+    capabilities: [],
+    publicationState: "PUBLISHED",
+    experienced: false,
+  };
+}
+
+async function openDetail(page: Page, id: string) {
+  await page.getByTestId("nav-directory").click();
+  await page.waitForSelector('[data-testid="directory"]');
+  await page.getByTestId(`provider-card-${id}`).first().locator(".ox-card-main").click();
+  await page.waitForSelector('[data-testid="app-details"]');
+}
+
+async function exitToHome(page: Page) {
+  await page.evaluate(() => (window as Window & { __oxExitExperienceToHome?: () => void }).__oxExitExperienceToHome?.());
+  await page.waitForSelector('[data-testid="home"]', { timeout: 15_000 });
+}
+
+test("connected Directory: the live MrFundzMan record resolves to one canonical provider with App and Space", async (t) => {
+  let chromium: typeof import("playwright").chromium;
+  try { ({ chromium } = await import("playwright")); } catch { t.skip("playwright unavailable"); return; }
+  resetCatalogSigningKeysForTests();
+  const keys = await exportGeneratedCatalogKeysForTests();
+  const catalog = await resetReleaseCatalogForTests().buildDeviceSignedCatalog();
+  const liveMrFundzMan = liveRecord("ins_9c57cac9f6fa4167", "MrFundzMan", "https://mrfundzman.getlifeos.app");
+  const lookalike = liveRecord("ins_5dc163addb3a4f20", "MrFundzMan", "https://mrfundzman-lookalike.invalid");
+  const unknown = liveRecord("ins_unknown0000000001", "Unknown Provider", "https://unknown-provider.invalid");
+  const live: LiveDirectory = {
+    applications: [liveMrFundzMan, lookalike, unknown],
+    featured: [liveMrFundzMan],
+    catalog,
+    publicKeySpkiBase64: keys.publicKeySpkiBase64,
+  };
+  const a = await loadMedia(videoA.file);
+  const broadcast = await listen(broadcastProducer({ a }).handler);
+  const bootstrap = await listen((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<!doctype html><title>mrfundzmanOS</title><main>mrfundzmanOS ready</main>"); });
+  const xperience = await serveDist();
+  const ports = { xperience: xperience.port, bootstrap: bootstrap.port, broadcast: broadcast.port };
+  const profileDir = await mkdtemp(join(tmpdir(), "ox-connected-"));
+  const context = await chromium.launchPersistentContext(profileDir, { headless: true, viewport: { width: 1440, height: 900 } });
+  const calls = await hermetic(context, live);
+  // Catalog preload may fetch release entrypoints; the provider page itself must never navigate there.
+  const liveNavigations: string[] = [];
+  context.on("request", (request) => {
+    if (request.isNavigationRequest() && PRODUCTION_PROVIDERS.test(request.url())) liveNavigations.push(request.url());
+  });
+  try {
+    const { page } = await openHost(context, ports);
+    await page.waitForSelector('[data-testid="home"]', { timeout: 15_000 });
+    await page.getByTestId("nav-directory").click();
+    const directory = page.getByTestId("directory");
+    await directory.getByTestId(`provider-card-${unknown.id}`).waitFor({ state: "visible", timeout: 15_000 });
+
+    // One canonical provider for the live record; the live id never becomes a second executable card.
+    assert.equal(await directory.getByTestId(`provider-card-${liveMrFundzMan.id}`).count(), 0);
+    const canonical = directory.getByTestId(`provider-card-${providerId}`).first();
+    assert.match(await canonical.innerText(), /MrFundzMan/);
+    assert.deepEqual(await directory.getByTestId(`provider-modes-${providerId}`).first().locator("em").allInnerTexts(), ["APP", "SPACE"]);
+    const executableMrFundzMan = await directory.locator('[data-testid^="provider-modes-"]').evaluateAll((badges) =>
+      badges.filter((badge) => badge.closest("article")?.textContent?.includes("MrFundzMan")).length);
+    assert.equal(executableMrFundzMan, 1, "exactly one executable MrFundzMan provider");
+
+    // Unbound live records stay discoverable, honestly labelled, and cannot be opened.
+    for (const record of [lookalike, unknown]) {
+      const card = directory.getByTestId(`provider-card-${record.id}`);
+      assert.equal(await card.getByTestId(`provider-not-released-${record.id}`).innerText(), "NOT RELEASED");
+      assert.equal(await card.locator(".ox-card-actions .ox-button").isDisabled(), true);
+    }
+    await openDetail(page, unknown.id);
+    await page.getByTestId("provider-not-released").waitFor();
+    assert.equal(await page.locator(`[data-testid^="xperience-target-${unknown.id}-"]`).count(), 0);
+    console.log("CONNECTED_DIRECTORY", "canonical:", providerId, "live-record:", liveMrFundzMan.id, "unbound:NOT_RELEASED");
+
+    // App: provider UI from the trusted entrypoint, no Space UI; the server still sees the live record id.
+    await openDetail(page, providerId);
+    assert.match(await page.getByTestId("app-details").innerText(), /MrFundzMan/);
+    await page.getByTestId(`xperience-target-${providerId}-app`).click();
+    await expectTarget(page, "APP");
+    await page.frameLocator("iframe.ox-immersive-frame.is-active").getByText("mrfundzmanOS ready").waitFor({ timeout: 15_000 });
+    assert.equal(await page.locator("iframe.ox-immersive-frame.is-active").getAttribute("src"), `http://127.0.0.1:${bootstrap.port}/`);
+    assert.equal(await page.locator(".ox-space-summon").count(), 0);
+    assert.equal(await page.getByTestId("space-tv").count(), 0);
+    for (let attempt = 0; attempt < 50 && !calls.includes(`POST /v1/experience/${liveMrFundzMan.id}/open`); attempt += 1) await page.waitForTimeout(100);
+    assert.ok(calls.includes(`POST /v1/experience/${liveMrFundzMan.id}/open`), `server open addressed the live record: ${calls.join(", ")}`);
+
+    // Space: same canonical provider, Space controls.
+    await page.getByTestId("xperience-host-controls").click();
+    await page.getByRole("menu", { name: "Xperience controls" }).getByRole("menuitem", { name: "Xperience Space" }).click();
+    await expectTarget(page, "SPACE");
+    await page.getByRole("button", { name: "Summon controls" }).click();
+    assert.deepEqual(await page.getByTestId("space-controls").getByRole("button").allInnerTexts(), ["TV", "Space Switch", "Revolve", "Return to App"]);
+    assert.deepEqual(liveNavigations, [], "the live record's origin must never be loaded as the provider page");
+    console.log("CONNECTED_APP_SPACE", "app:trusted-entrypoint", "space:controls", "live-origin-navigations:0");
+  } finally {
+    await context.close().catch(() => undefined);
+    await close(broadcast.server);
+    await close(bootstrap.server);
+    await close(xperience.server);
+    await rm(profileDir, { recursive: true, force: true });
+  }
+});
+
+test("Space is independent of App reachability; App offline is an honest connection-required state", async (t) => {
+  let chromium: typeof import("playwright").chromium;
+  try { ({ chromium } = await import("playwright")); } catch { t.skip("playwright unavailable"); return; }
+  const a = await loadMedia(videoA.file);
+  assert.equal(a.mediaId, videoA.canonicalMediaId);
+  const broadcast = await listen(broadcastProducer({ a }).handler);
+  const bootstrap = await listen((_req, res) => { res.setHeader("content-type", "text/html"); res.end("<!doctype html><title>mrfundzmanOS</title><main>mrfundzmanOS ready</main>"); });
+  const xperience = await serveDist();
+  const ports = { xperience: xperience.port, bootstrap: bootstrap.port, broadcast: broadcast.port };
+  const profileDir = await mkdtemp(join(tmpdir(), "ox-space-route-"));
+  let context = await chromium.launchPersistentContext(profileDir, { headless: true, viewport: { width: 1440, height: 900 } });
+  await hermetic(context);
+  const mediaRequests = (urls: string[]) => urls.filter((url) => url.endsWith("/media")).length;
+  try {
+    // Prepare: Directory → Space → TV caches real Video A locally.
+    const first = await openHost(context, ports);
+    await first.page.waitForSelector('[data-testid="home"]', { timeout: 15_000 });
+    await openDetail(first.page, providerId);
+    await first.page.getByTestId(`xperience-target-${providerId}-space`).click();
+    await expectTarget(first.page, "SPACE");
+    await first.page.getByRole("button", { name: "Summon controls" }).click();
+    await playTv(first.page, a);
+    await context.close();
+
+    // NO_ROUTE: App origin and producer are both gone. Restart restores Space from local state.
+    await close(bootstrap.server);
+    await close(broadcast.server);
+    context = await chromium.launchPersistentContext(profileDir, { headless: true, viewport: { width: 1440, height: 900 } });
+    await hermetic(context);
+    const noRoute = await openHost(context, ports);
+    await expectTarget(noRoute.page, "SPACE");
+    await noRoute.page.getByRole("button", { name: "Summon controls" }).click();
+    const restored = await playTv(noRoute.page, a);
+    assert.equal(await noRoute.page.getByTestId("experience-frame-failed").count(), 0, "Space must not show the App failure overlay");
+    assert.equal(await noRoute.page.getByTestId("restore-notice").count(), 0);
+    assert.equal(mediaRequests(noRoute.producer), 0, "NO_ROUTE Space must play local media only");
+    assert.equal(noRoute.external.length, 0);
+    console.log("SPACE_NO_ROUTE_RESTART", `${restored.width}x${restored.height}`, `time:${restored.time}->${restored.after}`, `local-blob:${restored.src.startsWith("blob:")}`);
+
+    // Network disabled: Directory-initiated Space opens from local state.
+    await context.setOffline(true);
+    const before = noRoute.producer.length;
+    await exitToHome(noRoute.page);
+    await openDetail(noRoute.page, providerId);
+    await noRoute.page.getByTestId(`xperience-target-${providerId}-space`).click();
+    await expectTarget(noRoute.page, "SPACE");
+    await noRoute.page.getByRole("button", { name: "Summon controls" }).click();
+    const offlinePlay = await playTv(noRoute.page, a);
+    assert.equal(mediaRequests(noRoute.producer.slice(before)), 0, "offline Space made an external media request");
+    assert.equal(noRoute.external.length, 0);
+    console.log("SPACE_OFFLINE_DIRECTORY", `${offlinePlay.width}x${offlinePlay.height}`, `time:${offlinePlay.time}->${offlinePlay.after}`);
+
+    // App offline: honest connection-required state, never a silent fallback into Space.
+    await exitToHome(noRoute.page);
+    await openDetail(noRoute.page, providerId);
+    await noRoute.page.getByTestId(`xperience-target-${providerId}-app`).click();
+    await noRoute.page.getByTestId("restore-notice").waitFor({ timeout: 15_000 });
+    assert.match(await noRoute.page.getByTestId("restore-notice").innerText(), /needs a connection/);
+    assert.equal(await noRoute.page.locator('[data-testid="in-app-experience"][data-execution-mode="SPACE"]').count(), 0);
+    assert.equal(await frame(noRoute.page).count(), 0);
+    console.log("APP_OFFLINE", "connection-required", "space-fallback:none");
+  } finally {
+    await context.close().catch(() => undefined);
+    await close(broadcast.server);
+    await close(bootstrap.server);
+    await close(xperience.server);
+    await rm(profileDir, { recursive: true, force: true });
   }
 });

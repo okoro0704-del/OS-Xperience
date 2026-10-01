@@ -1,6 +1,37 @@
 apply plugin: 'com.android.application'
 
+// Release signing comes only from user-level Gradle properties or the environment, never from the repo.
+// The certificate must match apps/os-experience/android-release-signing.json.
+def releaseSigningValue = { String name ->
+    def value = project.findProperty(name) ?: System.getenv(name)
+    return value ? value.toString().trim() : null
+}
+def releaseSigning = [
+    storeFile    : releaseSigningValue('OX_RELEASE_STORE_FILE'),
+    storePassword: releaseSigningValue('OX_RELEASE_STORE_PASSWORD'),
+    keyAlias     : releaseSigningValue('OX_RELEASE_KEY_ALIAS'),
+    keyPassword  : releaseSigningValue('OX_RELEASE_KEY_PASSWORD'),
+]
+def releaseSigningProblems = []
+['storeFile': 'OX_RELEASE_STORE_FILE', 'storePassword': 'OX_RELEASE_STORE_PASSWORD',
+ 'keyAlias': 'OX_RELEASE_KEY_ALIAS', 'keyPassword': 'OX_RELEASE_KEY_PASSWORD'].each { field, name ->
+    if (!releaseSigning[field]) releaseSigningProblems << "${name} is not set"
+}
+if (releaseSigning.storeFile && !file(releaseSigning.storeFile).isFile()) {
+    releaseSigningProblems << "OX_RELEASE_STORE_FILE does not point to a readable keystore"
+}
+
 android {
+    signingConfigs {
+        release {
+            if (releaseSigningProblems.isEmpty()) {
+                storeFile file(releaseSigning.storeFile)
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
+            }
+        }
+    }
     namespace "com.digiconomy.osexperience"
     compileSdk rootProject.ext.compileSdkVersion
     buildFeatures {
@@ -10,20 +41,34 @@ android {
         applicationId "com.digiconomy.osexperience"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 13
-        versionName "0.3.5"
+        versionCode 14
+        versionName "0.3.6"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
-            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            // <dir>releases: the hosted APK lives in public/releases and must not be packed into the next APK.
+            ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~:<dir>releases'
         }
     }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
+    }
+}
+
+gradle.taskGraph.whenReady { graph ->
+    def releaseTask = graph.allTasks.find {
+        it.project == project && it.name ==~ /(assemble|bundle|package|install|sign|validateSigning)Release.*/
+    }
+    if (releaseTask && !releaseSigningProblems.isEmpty()) {
+        throw new GradleException(
+            "OS Xperience release signing is not configured (${releaseSigningProblems.join('; ')}). " +
+            "Release builds never fall back to debug or unsigned output. " +
+            "Set the OX_RELEASE_* values in %USERPROFILE%\\.gradle\\gradle.properties.")
     }
 }
 

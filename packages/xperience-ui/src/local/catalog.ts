@@ -165,3 +165,14 @@ export function filterDiscoverableCatalog(
     isConsumerDiscoverable(item.releaseState, item.visibility),
   );
 }
+
+/**
+ * Once a verified catalog with discoverable releases is stored, it is the only execution authority:
+ * providers it does not carry are discoverable at most, never executable. Before that (X1/X2 bootstrap)
+ * bundled and registry data remain authoritative.
+ */
+export function signedCatalogGovernsExecution(
+  catalog: SignedExperienceCatalog | null = readSignedCatalog(),
+): boolean {
+  return filterDiscoverableCatalog(catalog).length > 0;
+}

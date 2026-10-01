@@ -19,9 +19,13 @@ export function UpdateGate({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    const timer = window.setTimeout(() => {
-      void (async () => {
-        markBootPhase("UPDATE_CHECK");
+    let checking = false;
+    let initial = true;
+    const runCheck = async () => {
+      if (checking) return;
+      checking = true;
+      try {
+        if (initial) markBootPhase("UPDATE_CHECK");
         const decision = await checkOxUpdates();
         if (cancelled) return;
         if (decision.kind === "web_ota") {
@@ -35,12 +39,20 @@ export function UpdateGate({ children }: { children: ReactNode }) {
         ) {
           setNativePrompt(decision);
         }
-        markBootPhase("READY");
-      })();
-    }, 1500);
+        if (initial) markBootPhase("READY");
+      } finally {
+        initial = false;
+        checking = false;
+      }
+    };
+    const timer = window.setTimeout(() => void runCheck(), 1500);
+    // Offline launch: learn about newer builds once connectivity returns.
+    const onOnline = () => void runCheck();
+    window.addEventListener("online", onOnline);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
+      window.removeEventListener("online", onOnline);
     };
   }, []);
 

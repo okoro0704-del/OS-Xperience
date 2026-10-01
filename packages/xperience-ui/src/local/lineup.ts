@@ -6,7 +6,7 @@ import type {
 } from "@digiconomy/xperience-contract";
 import { normalizeOfflineCapability } from "@digiconomy/xperience-contract";
 import { MYBRANDOS_PUBLIC_ENTRY } from "./bootstrap.js";
-import { filterDiscoverableCatalog, readSignedCatalog } from "./catalog.js";
+import { filterDiscoverableCatalog, readSignedCatalog, signedCatalogGovernsExecution } from "./catalog.js";
 import { readRegistry, registryToDirectoryView } from "./registry.js";
 
 export const LINEUP_KEY = "ox.experience-lineup.v1";
@@ -86,18 +86,16 @@ export function buildLineup(options?: {
 
   const seen = new Set<string>();
   const out: LineupEntry[] = [];
-  const discoverable = new Set(
-    filterDiscoverableCatalog(readSignedCatalog()).map((item) => item.experienceId),
-  );
-  // Until a signed catalog exists, keep X1/X2 bootstrap behavior.
-  const catalogActive = Boolean(readSignedCatalog());
+  const catalog = readSignedCatalog();
+  const discoverable = new Set(filterDiscoverableCatalog(catalog).map((item) => item.experienceId));
+  const governed = signedCatalogGovernsExecution(catalog);
 
   for (const id of ids) {
     if (seen.has(id)) continue;
     seen.add(id);
     const entry = byId.get(id);
     if (!entry) continue;
-    if (catalogActive && discoverable.size > 0 && !discoverable.has(id)) continue;
+    if (governed && !discoverable.has(id)) continue;
     // Locked-by-release: show as LOCKED availability when present in device catalog but not discoverable
     out.push({
       experienceId: entry.experienceId,

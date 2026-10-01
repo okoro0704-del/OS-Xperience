@@ -8,8 +8,9 @@ import type {
   XperienceInstallation,
 } from "@digiconomy/xperience-contract";
 import { canOperateOffline, buildLocalOpenPayload, entryToOpenApp, shellAuthPosture } from "./auth-contract.js";
-import { MYBRANDOS_PUBLIC_ENTRY, MYBRANDOS_PUBLIC_ID } from "./bootstrap.js";
+import { MYBRANDOS_PUBLIC_ENTRY, MYBRANDOS_PUBLIC_ID, bootstrapPublicEntry } from "./bootstrap.js";
 import { ensureInstallation, updateInstallationLastExperience } from "./installation.js";
+import { canonicalProviderId, resolveDirectoryProviders, resolveMemberships } from "./providers.js";
 import {
   ensureBootstrapRegistry,
   findRegistryEntry,
@@ -63,19 +64,21 @@ export function bootFromLocal(options?: {
   lockedExperienceId?: string | null;
   /** X1 first-open auto-entry. General directory hosts disable it so first open lands on the Directory. */
   restoreOnFirstOpen?: boolean;
+  /** Host's generated runtime stamp (OS Xperience: ox-versions.json). */
+  runtimeVersion?: string;
 }): XperienceBootResult {
   const online = options?.online ?? (typeof navigator !== "undefined" ? navigator.onLine : false);
-  const installation = ensureInstallation();
+  const installation = ensureInstallation(new Date(), options?.runtimeVersion);
   const lastMode = readRuntimeMode();
   let registry = ensureBootstrapRegistry();
   if (registry.length === 0) {
     registry = [MYBRANDOS_PUBLIC_ENTRY];
   }
 
-  const directory = registry.map(registryToDirectoryView);
+  const directory = resolveDirectoryProviders(registry.map(registryToDirectoryView));
   const featured = directory.filter(isMybrandPublic).slice(0, 4);
   const featuredFallback = featured.length ? featured : directory.slice(0, 4);
-  const memberships = registry.map(membershipFromEntry);
+  const memberships = resolveMemberships(registry.map(membershipFromEntry));
 
   const lastExperience = readLastExperience();
   let restore: XperienceBootResult["restore"] = null;
@@ -91,15 +94,24 @@ export function bootFromLocal(options?: {
     (registry.some((e) => e.experienceId === MYBRANDOS_PUBLIC_ID)
       ? MYBRANDOS_PUBLIC_ID
       : registry.find(isMybrandPublic)?.experienceId);
+  // A restored live record resumes as the canonical provider it is bound to.
+  const restoredRecord = restoredTargetId ? findRegistryEntry(restoredTargetId) : null;
+  const canonicalRestoredId = restoredRecord
+    ? canonicalProviderId({ id: restoredRecord.experienceId, origin: restoredRecord.origin })
+    : restoredTargetId;
   // A host-configured lock normalizes stale state before any frame is resolved.
-  const targetId = options?.lockedExperienceId ?? restoredTargetId;
+  const targetId = options?.lockedExperienceId ?? canonicalRestoredId;
 
   if (shouldRestore && targetId) {
-    const entry = findRegistryEntry(targetId) ?? registry.find((e) => e.experienceId === targetId);
+    const entry =
+      findRegistryEntry(targetId) ??
+      registry.find((e) => e.experienceId === targetId) ??
+      (targetId === MYBRANDOS_PUBLIC_ID ? bootstrapPublicEntry() : undefined);
     if (entry) {
       const app = entryToOpenApp(entry);
+      const lastId = lastExperience?.lastExperienceId;
       const executionMode =
-        lastExperience?.lastExperienceId === entry.experienceId ? lastExperience.executionMode : undefined;
+        lastId === entry.experienceId || (lastId && lastId === restoredTargetId) ? lastExperience?.executionMode : undefined;
       const shellAuth = shellAuthPosture(entry.authMode);
       const offlineCheck = canOperateOffline(entry.offlineCapability, online);
       if (!offlineCheck.ok) {

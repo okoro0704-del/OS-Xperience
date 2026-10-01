@@ -2,7 +2,8 @@ import type { XperienceInstallation } from "@digiconomy/xperience-contract";
 import { readJson, writeJson } from "./storage.js";
 
 export const INSTALLATION_KEY = "ox.installation.v1";
-export const RUNTIME_VERSION = "2026.09.21.2";
+/** Recorded when the host supplies no generated runtime stamp; OS Xperience passes its ox-versions.json stamp. */
+export const UNSTAMPED_RUNTIME_VERSION = "unstamped";
 
 function newId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -27,13 +28,13 @@ function isInstallation(value: unknown): value is XperienceInstallation {
  * Ensure a local installation identity exists.
  * This is device/install continuity — never TrustID / PDI / human verification.
  */
-export function ensureInstallation(now = new Date()): XperienceInstallation {
+export function ensureInstallation(now = new Date(), runtimeVersion?: string): XperienceInstallation {
   const existing = readJson<unknown>(INSTALLATION_KEY);
   if (isInstallation(existing)) {
     const next: XperienceInstallation = {
       ...existing,
       lastOpenedAt: now.toISOString(),
-      runtimeVersion: existing.runtimeVersion || RUNTIME_VERSION,
+      runtimeVersion: runtimeVersion || existing.runtimeVersion || UNSTAMPED_RUNTIME_VERSION,
     };
     writeJson(INSTALLATION_KEY, next);
     return next;
@@ -42,7 +43,7 @@ export function ensureInstallation(now = new Date()): XperienceInstallation {
     installationId: newId(),
     createdAt: now.toISOString(),
     lastOpenedAt: now.toISOString(),
-    runtimeVersion: RUNTIME_VERSION,
+    runtimeVersion: runtimeVersion || UNSTAMPED_RUNTIME_VERSION,
   };
   writeJson(INSTALLATION_KEY, created);
   return created;

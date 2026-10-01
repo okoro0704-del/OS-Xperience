@@ -5,6 +5,7 @@ import { ExperienceApp } from "@digiconomy/xperience-ui";
 import { attachNativeShellBridge, openExternalUrl } from "./native-bridge.js";
 import { BootWatchdog, ShellErrorBoundary, UpdateGate } from "./UpdateGate.js";
 import { markBootPhase } from "./boot.js";
+import { OX_RUNTIME_VERSION } from "./ox-version-stamp.js";
 
 markBootPhase("NATIVE_START");
 
@@ -40,6 +41,7 @@ function NativeShellApp() {
         <UpdateGate>
           <ExperienceApp
             online={online}
+            runtimeVersion={OX_RUNTIME_VERSION}
             openExternalUrl={openExternalUrl}
             onHardwareBackReady={(handler) => {
               backHandlerRef.current = handler;

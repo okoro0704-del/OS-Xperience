@@ -10,6 +10,12 @@
   VITE_XPERIENCE_USER_ID = "user-1"
   VITE_XPERIENCE_USER_NAME = "Member"
 
+[[headers]]
+  for = "/ox-update-manifest.json"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Cache-Control = "no-cache"
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

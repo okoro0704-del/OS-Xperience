@@ -19,7 +19,7 @@ export {
 } from "./auth-contract.js";
 export {
   INSTALLATION_KEY,
-  RUNTIME_VERSION,
+  UNSTAMPED_RUNTIME_VERSION,
   ensureInstallation,
   readInstallation,
   updateInstallationLastExperience,
@@ -90,6 +90,14 @@ export {
 } from "./runtime.js";
 export { probeExperienceUrl } from "./probe.js";
 export {
+  canonicalProviderId,
+  directoryRecordId,
+  providerSource,
+  resolveDirectoryProviders,
+  resolveMemberships,
+  type ProviderSource,
+} from "./providers.js";
+export {
   availableProviderTargets,
   chooseExecutionTarget,
   nextProviderWithMode,
@@ -109,6 +117,7 @@ export {
   preloadExperiencePackage,
   readPackageStates,
   readSignedCatalog,
+  signedCatalogGovernsExecution,
   storeCatalogPublicKey,
   storeSignedCatalog,
   writePackageState,

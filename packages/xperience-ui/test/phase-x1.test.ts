@@ -183,6 +183,9 @@ test("14. An online-only Experience fails gracefully offline", () => {
       ...MYBRANDOS_PUBLIC_ENTRY,
       experienceId: "online.only",
       name: "Online Only",
+      // Its own origin: an exact trusted origin would bind the record to that trusted provider.
+      entrypoint: "https://online-only.example/",
+      origin: "https://online-only.example/",
       offlineCapability: "NONE",
       status: "ONLINE_ONLY",
     },

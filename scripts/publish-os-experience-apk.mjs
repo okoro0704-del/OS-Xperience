@@ -2,6 +2,9 @@
  * Publish the latest OS Xperience APK to the Windows Desktop.
  * Overwrites the stable Desktop APKs and removes older OS-Xperience*.apk
  * files on the Desktop only (never deletes unrelated APKs elsewhere).
+ *
+ * --release publishes the production-signed APK and requires it to be byte-identical
+ * to the hosted copy staged at public/releases/OS-Xperience.apk.
  */
 import {
   copyFileSync,
@@ -18,8 +21,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execSync } from "node:child_process";
 
+const release = process.argv.includes("--release");
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const apkDir = join(root, "apps", "os-experience", "android", "app", "build", "outputs", "apk", "debug");
+const apkDir = join(root, "apps", "os-experience", "android", "app", "build", "outputs", "apk", release ? "release" : "debug");
+const hostedApk = join(root, "apps", "os-experience", "public", "releases", "OS-Xperience.apk");
 const versionsPath = join(root, "apps", "os-experience", "ox-versions.json");
 const liveUrl =
   process.env.CAPACITOR_SERVER_URL ||
@@ -90,8 +95,13 @@ const sendPath = join(desktop, sendName);
 
 const source = findNewestApk(apkDir);
 if (!source) {
-  console.error(`No debug APK found under ${apkDir}`);
-  console.error("Build first: npm run android:experience:debug");
+  console.error(`No ${release ? "release" : "debug"} APK found under ${apkDir}`);
+  console.error(`Build first: npm run android:experience:${release ? "release" : "debug"}`);
+  process.exit(1);
+}
+if (release && (!existsSync(hostedApk) || !readFileSync(source.path).equals(readFileSync(hostedApk)))) {
+  console.error(`Release APK ${source.path} is not byte-identical to the hosted copy ${hostedApk}.`);
+  console.error("Run: npm run android:experience:release");
   process.exit(1);
 }
 
@@ -117,7 +127,7 @@ const removed = pruneOldOsXperienceApks(desktop, [stableName, sendName]);
 writeFileSync(
   join(desktop, "OS-Xperience-UPDATE.txt"),
   [
-    "OS Xperience — BUNDLED APK",
+    release ? "OS Xperience — PRODUCTION-SIGNED BUNDLED APK" : "OS Xperience — BUNDLED APK",
     "",
     `Updated: ${new Date().toLocaleString()}`,
     `Native: ${nativeVersion} (build ${nativeBuildNumber})`,
@@ -129,6 +139,12 @@ writeFileSync(
     `  ${sendPath}`,
     "",
     "INSTALL ONCE (tap Update if already installed).",
+    ...(release
+      ? [
+          "If an older Android Debug-signed OS Xperience (build 13 or earlier) is installed,",
+          "Android will refuse the update: uninstall it once, then install this APK.",
+        ]
+      : []),
     "This build boots from bundled local assets (offline shell).",
     "Network / catalog / update checks run after the shell is visible.",
     "Only native Android shell changes need a new APK from the Desktop.",

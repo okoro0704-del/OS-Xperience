@@ -1,13 +1,13 @@
 {
-  "nativeVersion": "0.3.5",
-  "nativeBuildNumber": 13,
-  "runtimeVersion": "2026.09.29.1",
+  "nativeVersion": "0.3.6",
+  "nativeBuildNumber": 14,
+  "runtimeVersion": "2026.09.30.1",
   "minimumRuntimeVersion": "2026.09.01.0",
   "minimumNativeVersion": "0.3.0",
   "minimumNativeBuildNumber": 8,
-  "releaseId": "ox-20260929-2297d207df",
-  "publishedAt": "2026-09-29T09:40:18.297Z",
+  "releaseId": "ox-20260930-49c523f862",
+  "publishedAt": "2026-10-01T11:16:16.597Z",
   "apkUrl": "https://xperience.getlifeos.app/releases/OS-Xperience.apk",
   "runtimeUrl": "https://xperience.getlifeos.app",
-  "notes": "Dual-Xperience directory: Xperience App and Xperience Space per provider; locked/event mode is explicit"
+  "notes": "Directory resolves live records to canonical providers; Space runs offline without the App origin; updates read the hosted manifest first"
 }
