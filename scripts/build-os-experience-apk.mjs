@@ -6,6 +6,7 @@
  *   node scripts/build-os-experience-apk.mjs --release  production-signed APK, verified against
  *                                                        apps/os-experience/android-release-signing.json
  *                                                        and staged at public/releases/OS-Xperience.apk
+ *                                                        (plus dist/releases for `netlify deploy --dir dist`)
  */
 import { spawnSync } from "node:child_process";
 import { copyFileSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
@@ -152,12 +153,14 @@ if (release) {
   assertFile(releaseApk, "signed release APK");
   const verified = verifyReleaseApk(releaseApk);
   copyFileSync(releaseApk, hostedApk);
+  // dist was built before the APK existed; keep it deployable as-is.
+  copyFileSync(releaseApk, join(appDir, "dist", "releases", "OS-Xperience.apk"));
   console.log("\nVerified production release APK:");
   console.log(`  ${verified.packageName} ${verified.versionName} (${verified.versionCode})`);
   console.log(`  signer  ${verified.signer}`);
   console.log(`  size    ${verified.size}`);
   console.log(`  sha256  ${verified.sha256}`);
-  console.log(`Staged for hosting → ${hostedApk}`);
+  console.log(`Staged for hosting → ${hostedApk} and dist/releases/OS-Xperience.apk`);
   console.log("Publish to the Desktop after the hosted copy is verified:");
   console.log("  node scripts/publish-os-experience-apk.mjs --release");
 } else {
