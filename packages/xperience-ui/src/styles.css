@@ -1022,6 +1022,31 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .ox-reveal-banner strong { display: block; font-family: "Outfit", sans-serif; font-size: 15px; }
 .ox-reveal-banner p { margin: 2px 0 0; color: #9eb4d8; font-size: 12px; }
 
+.ox-xperience-choices { display: grid; grid-template-columns: 1fr; gap: 14px; max-width: 980px; }
+.ox-xperience-choice { position: relative; display: grid; min-height: 196px; align-content: end; justify-items: start; gap: 6px; overflow: hidden; padding: clamp(18px, 4vw, 28px); color: var(--ox-text); border: 1px solid var(--ox-border-strong); border-radius: var(--ox-radius-lg); background: linear-gradient(150deg, rgba(26, 44, 78, .92), rgba(9, 14, 25, .94)); box-shadow: var(--ox-shadow); cursor: pointer; text-align: left; transition: transform .25s var(--ox-ease), border-color .25s; }
+.ox-xperience-choice:hover, .ox-xperience-choice:focus-visible { border-color: rgba(103, 149, 236, .6); transform: translateY(-2px); }
+.ox-xperience-choice.is-space { background: linear-gradient(150deg, rgba(18, 58, 66, .9), rgba(8, 16, 24, .94)); }
+.ox-xperience-choice-icon { position: absolute; top: clamp(16px, 3vw, 24px); left: clamp(18px, 4vw, 28px); display: grid; width: 48px; height: 48px; place-items: center; color: #8fb4fb; border: 1px solid rgba(90, 144, 248, .32); border-radius: 50%; background: rgba(47, 123, 255, .12); }
+.ox-xperience-choice.is-space .ox-xperience-choice-icon { color: #6fe0c8; border-color: rgba(80, 210, 180, .32); background: rgba(47, 214, 170, .1); }
+.ox-xperience-choice small { color: #77a5ff; font-size: 10px; font-weight: 500; letter-spacing: .1em; text-transform: uppercase; }
+.ox-xperience-choice.is-space small { color: #6fe0c8; }
+.ox-xperience-choice strong { font-family: "Outfit", sans-serif; font-size: clamp(22px, 3.6vw, 30px); font-weight: 600; letter-spacing: -.01em; }
+.ox-xperience-choice p { margin: 0; max-width: 420px; color: var(--ox-text-secondary); font-size: 13px; line-height: 1.5; }
+.ox-xperience-choice em { margin-top: 6px; color: var(--ox-text-secondary); font-size: 11px; font-style: normal; letter-spacing: .04em; }
+.ox-xperience-list { display: grid; gap: 8px; max-width: 980px; }
+.ox-xperience-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--ox-border); border-radius: 14px; background: linear-gradient(145deg, rgba(19, 29, 48, .82), rgba(9, 14, 25, .9)); }
+.ox-xperience-row > div { display: grid; min-width: 0; gap: 2px; }
+.ox-xperience-row small { color: #77a5ff; font-size: 9px; font-weight: 500; letter-spacing: .08em; text-transform: uppercase; }
+.ox-xperience-row strong { overflow: hidden; font-family: "Outfit", sans-serif; font-size: var(--ox-card-title); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ox-xperience-row .ox-mode-badges em.is-ok { color: var(--ox-success); background: rgba(47, 214, 122, .12); }
+.ox-xperience-row .ox-mode-badges em.is-blocked { color: var(--ox-warning); background: rgba(240, 180, 41, .12); }
+.ox-xperience-row .ox-button:disabled { cursor: not-allowed; }
+.ox-xperience-browser > .ox-icon-button { margin-bottom: 6px; }
+@media (min-width: 720px) {
+  .ox-xperience-choices { grid-template-columns: 1fr 1fr; }
+  .ox-xperience-choice { min-height: 260px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ox-in-app.ox-immersive.is-nav-dragging {
     transition: none !important;

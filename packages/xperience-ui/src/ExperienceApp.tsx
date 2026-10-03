@@ -32,16 +32,25 @@ import {
   markRevealSeen,
   nextExperienceId,
   nextProviderWithMode,
+  noRouteBroadcastSource,
   planSwitch,
   previousExperienceId,
   probeExperienceUrl,
+  providerTarget,
   providerTargets,
   rememberOpenedExperience,
+  requireExecutionTarget,
   resolveDirectoryProviders,
   resolveMemberships,
   shellAuthPosture,
+  SPACE_READINESS_LABEL,
+  classifySpaceReadiness,
+  spaceLocallyPlayable,
   storeCatalogPublicKey,
+  xperienceAppEntries,
+  xperienceSpaceCandidates,
   type LineupEntry,
+  type XperienceEntry,
 } from "./local/index.js";
 import { ExperienceSwitcher, attachDoubleTap } from "./switcher/index.js";
 import { getSpeechRecognition, type SpeechRecognition, type VoiceState } from "./speech.js";
@@ -88,6 +97,7 @@ declare global {
     __oxExperienceActive?: boolean;
     __oxGestureDebug?: (phase: string, count: number, dx?: number, dy?: number) => void;
     __oxExitExperienceToHome?: () => void;
+    __oxHardwareBack?: () => boolean;
   }
 }
 
@@ -114,6 +124,9 @@ type Screen =
   | "search"
   | "detail"
   | "experience"
+  | "xperience"
+  | "xperience-apps"
+  | "xperience-space"
   | "voice";
 type MembershipFilter = "All" | "Active" | "Paused" | "Recently Used";
 type Participant = { id: string; role: string; email?: string | null; displayName?: string | null };
@@ -195,6 +208,9 @@ const EXECUTION_MODE_LABEL: Record<ExperienceExecutionMode, string> = {
   SPACE: "Xperience Space",
 };
 
+const XPERIENCE_SCREENS: readonly Screen[] = ["xperience", "xperience-apps", "xperience-space"];
+const ENTRY_BROWSER: Record<XperienceEntry, Screen> = { APPS: "xperience-apps", SPACE: "xperience-space" };
+
 /** A live record bound to a trusted provider never relocates it: the public destination stays the trusted entrypoint. */
 function trustedOpenPayload(payload: OpenExperiencePayload, app: DirectoryApplicationView): OpenExperiencePayload {
   if (directoryRecordId(app.id) === app.id || payload.surface !== "PUBLIC") return payload;
@@ -263,11 +279,9 @@ function AppCard({
 function BottomNav({
   screen,
   go,
-  onEnterXperience,
 }: {
   screen: Screen;
   go: (screen: Screen) => void;
-  onEnterXperience: () => void;
 }) {
   return (
     <nav className="ox-bottom-nav" aria-label="Primary navigation">
@@ -290,7 +304,7 @@ function BottomNav({
         <span>Directory</span>
       </button>
 
-      <button type="button" data-testid="nav-xperience" className={`ox-nav-dest${screen === "experience" ? " active" : ""}`} onClick={onEnterXperience}>
+      <button type="button" data-testid="nav-xperience" className={`ox-nav-dest${XPERIENCE_SCREENS.includes(screen) ? " active" : ""}`} onClick={() => go("xperience")}>
         <Icon name="xperience" /><span>Xperience</span>
       </button>
 
@@ -395,6 +409,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [tvSource, setTvSource] = useState<string | null>(null);
   const [tvTitle, setTvTitle] = useState<string | null>(null);
   const [revealBanner, setRevealBanner] = useState<{ id: string; name: string } | null>(null);
+  const [xperienceEntry, setXperienceEntry] = useState<XperienceEntry | null>(null);
+  const [spacePlayable, setSpacePlayable] = useState<Record<string, boolean> | null>(null);
+  const xperienceEntryRef = useRef<XperienceEntry | null>(null);
   const bootRestoreDoneRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const immersiveRef = useRef<HTMLDivElement | null>(null);
@@ -471,7 +488,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setActiveExperienceId(null);
       setSwitcherOpen(false);
       setRestoreNotice(message);
-      navigate("home", { replace: true });
+      const entry = xperienceEntryRef.current;
+      navigate(entry ? ENTRY_BROWSER[entry] : "home", { replace: true });
     },
     [navigate],
   );
@@ -492,6 +510,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
         offlineMessage?: string | null;
         app?: DirectoryApplicationView;
         executionMode?: ExperienceExecutionMode | null;
+        /** The mode was chosen explicitly: run it or refuse, never substitute the other mode. */
+        strict?: boolean;
       },
     ) => {
       const resolvedToId = resolveLockedExperience(toId, lockedExperienceId);
@@ -510,17 +530,19 @@ export function ExperienceApp(props: ExperienceAppProps) {
         options?.executionMode ??
         (resolvedToId === activeIdRef.current ? executionModeRef.current : getExperienceSlot(resolvedToId)?.executionMode) ??
         null;
-      const target = chooseExecutionTarget(
-        providerTargets({
-          id: resolvedToId,
-          entrypoint: toEntry.entrypoint,
-          executionModes: toEntry.executionModes ?? options?.app?.executionModes,
-        }),
-        requestedMode,
-        fixedExecutionMode,
-      );
+      const toTargets = providerTargets({
+        id: resolvedToId,
+        entrypoint: toEntry.entrypoint,
+        executionModes: toEntry.executionModes ?? options?.app?.executionModes,
+      });
+      const explicitMode = options?.strict ? options.executionMode ?? null : null;
+      const target = explicitMode
+        ? requireExecutionTarget(toTargets, explicitMode, fixedExecutionMode)
+        : chooseExecutionTarget(toTargets, requestedMode, fixedExecutionMode);
       if (!target) {
-        abortExperienceToHome(`${toEntry.name} has no released Xperience mode on this installation.`);
+        abortExperienceToHome(explicitMode
+          ? `${toEntry.name} has no released ${EXECUTION_MODE_LABEL[explicitMode]} on this installation.`
+          : `${toEntry.name} has no released Xperience mode on this installation.`);
         return;
       }
       const targetChanged = resolvedToId !== activeIdRef.current || target.executionMode !== executionModeRef.current;
@@ -630,15 +652,47 @@ export function ExperienceApp(props: ExperienceAppProps) {
     [abortExperienceToHome, directory, fixedExecutionMode, lockedExperienceId, memberships, navigate],
   );
 
+  /** Mode the running Experience is confined to by the Xperience browser it was launched from. */
+  const isolatedExecutionMode = useCallback((): ExperienceExecutionMode | null => {
+    const entry = xperienceEntryRef.current;
+    if (entry === "APPS") return "APP";
+    if (entry === "SPACE") return executionModeRef.current;
+    return null;
+  }, []);
+
+  const isolateLineup = useCallback(
+    (entries: LineupEntry[], mode: ExperienceExecutionMode | null) => mode
+      ? entries.filter((entry) => providerTarget({ id: entry.experienceId, entrypoint: entry.entrypoint, executionModes: entry.executionModes }, mode))
+      : entries,
+    [],
+  );
+
   /** APP ↔ SPACE on the active provider; provider identity and lineup position are unchanged. */
   const switchExecutionMode = useCallback(
     (mode: ExperienceExecutionMode) => {
       const id = activeIdRef.current;
       if (!id || mode === executionModeRef.current) return;
       if (fixedExecutionMode && mode !== fixedExecutionMode) return;
-      applyMountPlan(refreshLineup(), id, id, { executionMode: mode });
+      if (xperienceEntryRef.current === "APPS" && mode !== "APP") return;
+      const nextLineup = refreshLineup();
+      if (mode === "APP" && executionModeRef.current === "SPACE") {
+        // Leaving a Space for its App is network-first; an unreachable App never tears the Space down.
+        const entry = nextLineup.find((item) => item.experienceId === id);
+        const appTarget = providerTarget({ id, entrypoint: entry?.entrypoint, executionModes: entry?.executionModes }, "APP");
+        void (async () => {
+          const probe = await ensureEntrypointReachable(appTarget?.entrypoint);
+          if (activeIdRef.current !== id || executionModeRef.current !== "SPACE") return;
+          if (!probe.ok) {
+            setSpaceNotice(`${entry?.name ?? "This"} App needs a connection. This Space keeps running on this installation.`);
+            return;
+          }
+          applyMountPlan(nextLineup, id, id, { executionMode: "APP", strict: true });
+        })();
+        return;
+      }
+      applyMountPlan(nextLineup, id, id, { executionMode: mode, strict: true });
     },
-    [applyMountPlan, fixedExecutionMode, refreshLineup],
+    [applyMountPlan, ensureEntrypointReachable, fixedExecutionMode, refreshLineup],
   );
 
   const switchToExperience = useCallback(
@@ -646,11 +700,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
       const nextLineup = refreshLineup();
       void (async () => {
         const entry = nextLineup.find((item) => item.experienceId === experienceId);
-        const planned = chooseExecutionTarget(
-          providerTargets({ id: experienceId, entrypoint: entry?.entrypoint, executionModes: entry?.executionModes }),
-          getExperienceSlot(experienceId)?.executionMode ?? null,
-          fixedExecutionMode,
-        );
+        const isolated = isolatedExecutionMode();
+        const targets = providerTargets({ id: experienceId, entrypoint: entry?.entrypoint, executionModes: entry?.executionModes });
+        const planned = isolated
+          ? requireExecutionTarget(targets, isolated, fixedExecutionMode)
+          : chooseExecutionTarget(targets, getExperienceSlot(experienceId)?.executionMode ?? null, fixedExecutionMode);
+        if (isolated && !planned) return;
         if (!mountedIdsRef.current.includes(experienceId) && planned?.executionMode !== "SPACE") {
           const probe = await ensureEntrypointReachable(entry?.entrypoint);
           if (!probe.ok) {
@@ -660,30 +715,32 @@ export function ExperienceApp(props: ExperienceAppProps) {
             return;
           }
         }
-        applyMountPlan(nextLineup, experienceId, activeIdRef.current);
+        applyMountPlan(nextLineup, experienceId, activeIdRef.current, isolated ? { executionMode: isolated, strict: true } : undefined);
         dismissSwitcher();
       })();
     },
-    [abortExperienceToHome, applyMountPlan, dismissSwitcher, ensureEntrypointReachable, fixedExecutionMode, refreshLineup],
+    [abortExperienceToHome, applyMountPlan, dismissSwitcher, ensureEntrypointReachable, fixedExecutionMode, isolatedExecutionMode, refreshLineup],
   );
 
   const switchNext = useCallback(() => {
     const id = activeIdRef.current;
     if (!id) return;
     const nextLineup = refreshLineup();
-    const nextId = nextExperienceId(nextLineup, id);
-    if (nextId) applyMountPlan(nextLineup, nextId, id);
+    const isolated = isolatedExecutionMode();
+    const nextId = nextExperienceId(isolateLineup(nextLineup, isolated), id);
+    if (nextId) applyMountPlan(nextLineup, nextId, id, isolated ? { executionMode: isolated, strict: true } : undefined);
     bumpSwitcherIdle();
-  }, [applyMountPlan, bumpSwitcherIdle, refreshLineup]);
+  }, [applyMountPlan, bumpSwitcherIdle, isolateLineup, isolatedExecutionMode, refreshLineup]);
 
   const switchPrevious = useCallback(() => {
     const id = activeIdRef.current;
     if (!id) return;
     const nextLineup = refreshLineup();
-    const prevId = previousExperienceId(nextLineup, id);
-    if (prevId) applyMountPlan(nextLineup, prevId, id);
+    const isolated = isolatedExecutionMode();
+    const prevId = previousExperienceId(isolateLineup(nextLineup, isolated), id);
+    if (prevId) applyMountPlan(nextLineup, prevId, id, isolated ? { executionMode: isolated, strict: true } : undefined);
     bumpSwitcherIdle();
-  }, [applyMountPlan, bumpSwitcherIdle, refreshLineup]);
+  }, [applyMountPlan, bumpSwitcherIdle, isolateLineup, isolatedExecutionMode, refreshLineup]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -897,12 +954,18 @@ export function ExperienceApp(props: ExperienceAppProps) {
     };
   }, [props.online]);
 
+  // Reconnect refreshes Directory/catalog in the background; the running Experience stays mounted.
   const wasOfflineRef = useRef(false);
   useEffect(() => {
-    if (typeof props.online !== "boolean") return;
-    if (props.online && wasOfflineRef.current) void load();
-    wasOfflineRef.current = !props.online;
-  }, [props.online, load]);
+    if (!offline && wasOfflineRef.current) void loadRef.current();
+    wasOfflineRef.current = offline;
+  }, [offline]);
+
+  useEffect(() => {
+    if (screen === "experience" || XPERIENCE_SCREENS.includes(screen)) return;
+    xperienceEntryRef.current = null;
+    setXperienceEntry(null);
+  }, [screen]);
 
   useEffect(() => {
     const query = window.matchMedia("(min-width: 960px)");
@@ -928,7 +991,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
       setActiveExperienceId(null);
       setFrameFailed(false);
       setSwitcherOpen(false);
-      setScreen("my-experience");
+      const entry = xperienceEntryRef.current;
+      setScreen(entry ? ENTRY_BROWSER[entry] : "my-experience");
+      return true;
+    }
+    if (current === "xperience-apps" || current === "xperience-space" || current === "xperience") {
+      const parent: Screen = current === "xperience" ? "home" : "xperience";
+      setScreenStack((stack) => stack.filter((item) => !XPERIENCE_SCREENS.includes(item) && item !== "experience"));
+      setScreen(parent);
       return true;
     }
     if (current === "detail") {
@@ -1091,6 +1161,13 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }, [screen, opened, openSwitcher, experienceOfflineMessage]);
 
   useEffect(() => {
+    window.__oxHardwareBack = handleHardwareBack;
+    return () => {
+      if (window.__oxHardwareBack === handleHardwareBack) delete window.__oxHardwareBack;
+    };
+  }, [handleHardwareBack]);
+
+  useEffect(() => {
     if (!props.onHardwareBackReady) return;
     props.onHardwareBackReady(() => handleHardwareBack());
   }, [props, handleHardwareBack]);
@@ -1160,13 +1237,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
       const nextLineup = refreshLineup([app, ...directory]);
       const online = !offline;
       const gate = canOperateOffline(app.offlineCapability, online);
-      const target = chooseExecutionTarget(
-        providerTargets({ id: app.id, entrypoint: app.xperienceUrl || app.productionUrl, executionModes: app.executionModes }),
-        executionMode ?? getExperienceSlot(app.id)?.executionMode ?? null,
-        fixedExecutionMode,
-      );
+      const targets = providerTargets({ id: app.id, entrypoint: app.xperienceUrl || app.productionUrl, executionModes: app.executionModes });
+      // An explicitly selected mode is honoured or refused; only unselected launches resume the slot's mode.
+      const target = executionMode
+        ? requireExecutionTarget(targets, executionMode, fixedExecutionMode)
+        : chooseExecutionTarget(targets, getExperienceSlot(app.id)?.executionMode ?? null, fixedExecutionMode);
       if (!target) {
-        abortExperienceToHome(notAdmittedNotice(app.id, app.name));
+        abortExperienceToHome(executionMode && targets.some((item) => item.availability === "AVAILABLE")
+          ? `${app.name} has no released ${EXECUTION_MODE_LABEL[executionMode]} on this installation.`
+          : notAdmittedNotice(app.id, app.name));
         return;
       }
       if (target.executionMode === "SPACE") {
@@ -1175,7 +1254,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
           abortExperienceToHome(`${app.name} Space is not prepared for offline use on this installation.`);
           return;
         }
-        applyMountPlan(nextLineup, app.id, activeIdRef.current, { app, offlineMessage: null, executionMode: "SPACE" });
+        applyMountPlan(nextLineup, app.id, activeIdRef.current, { app, offlineMessage: null, executionMode: "SPACE", strict: true });
         return;
       }
       if (!gate.ok) {
@@ -1198,6 +1277,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
           app,
           offlineMessage: null,
           executionMode: "APP",
+          strict: true,
         });
       })();
       void surface;
@@ -1242,6 +1322,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         applyMountPlan(nextLineup, app.id, activeIdRef.current, {
           app: { ...app, experienced: true },
           executionMode: executionMode ?? null,
+          strict: Boolean(executionMode),
         });
         // Prefer server embed URL when available without remounting if already warm.
         setOpened(trustedOpenPayload(payload, app));
@@ -1498,10 +1579,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const openTv = useCallback(async () => {
     setTvState("preparing"); setSpaceNotice(null);
     const base = (window as Window & { __oxBroadcastApiBase?: string }).__oxBroadcastApiBase ?? (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_MYBRANDOS_PUBLIC_API_BASE;
-    if (!base || !tvChannelId) { setTvState("unavailable"); return; }
+    if (!tvChannelId) { setTvState("unavailable"); return; }
     try {
       const store = new IndexedDbBroadcastHydrationStore();
-      const result = await hydrateAndPrepareSpaceTv({ channelId: tvChannelId, routeAvailable: !offline, now: () => new Date(), store, source: createHttpBroadcastSource(base) });
+      // Without a broadcast route the kernel still serves media this installation already holds.
+      const result = await hydrateAndPrepareSpaceTv({ channelId: tvChannelId, routeAvailable: !offline && Boolean(base), now: () => new Date(), store, source: base ? createHttpBroadcastSource(base) : noRouteBroadcastSource });
       const playback = result.playback;
       if (!playback || playback.state !== "LOCAL_PLAYING") { setTvState("unavailable"); return; }
       const local = await store.loadMedia(playback.media.mediaId) as (typeof playback.media & { bytes?: Uint8Array });
@@ -1554,22 +1636,80 @@ export function ExperienceApp(props: ExperienceAppProps) {
     .slice(0, 4);
   const forYouItems = featured.slice(0, 4);
 
-  const enterXperienceFromNav = () => {
-    const lineupId = activeExperienceId ?? lineup[0]?.experienceId;
-    const fromLineup = lineupId
-      ? directory.find((app) => app.id === lineupId)
-        ?? memberships.find((item) => item.applicationId === lineupId)?.application
-        ?? continueItems.find((item) => item.applicationId === lineupId)?.application
-      : undefined;
-    const resume = fromLineup
-      ?? continueItems[0]?.application
-      ?? memberships[0]?.application;
-    if (resume) {
-      void (resume.experienced ? openApplication(resume, "PUBLIC") : startApplication(resume));
+  const xperienceProviders = useMemo(
+    () => [...memberships.map((item) => item.application), ...directory],
+    [directory, memberships],
+  );
+  const appEntries = useMemo(
+    () => xperienceAppEntries(xperienceProviders, !offline),
+    // catalogRevision: a newly verified signed catalog can release or withdraw targets.
+    [xperienceProviders, offline, catalogRevision],
+  );
+  const spaceCandidates = useMemo(
+    () => xperienceSpaceCandidates(xperienceProviders),
+    [xperienceProviders, catalogRevision],
+  );
+  const spaceEntries = spaceCandidates.map((candidate) => {
+    const checking = Boolean(candidate.target && candidate.channelId && spacePlayable === null);
+    const classified = classifySpaceReadiness({
+      released: Boolean(candidate.target),
+      offlineCapability: candidate.app.offlineCapability,
+      channelId: candidate.channelId,
+      locallyPlayable: spacePlayable?.[candidate.app.id] ?? false,
+      online: !offline,
+    });
+    return { ...candidate, ...classified, checking, enterable: classified.enterable && !checking };
+  });
+
+  // Space readiness reads only the local Offline Kernel store — no Directory, App or broadcast request.
+  useEffect(() => {
+    if (screen !== "xperience" && screen !== "xperience-space") return;
+    let cancelled = false;
+    setSpacePlayable(null);
+    void (async () => {
+      const store = new IndexedDbBroadcastHydrationStore();
+      const next: Record<string, boolean> = {};
+      for (const candidate of spaceCandidates) {
+        if (candidate.target && candidate.channelId) next[candidate.app.id] = await spaceLocallyPlayable(store, candidate.channelId);
+      }
+      if (!cancelled) setSpacePlayable(next);
+    })();
+    return () => { cancelled = true; };
+  }, [screen, spaceCandidates, offline]);
+
+  const launchFromXperience = (app: DirectoryApplicationView, mode: ExperienceExecutionMode) => {
+    const entry: XperienceEntry = mode === "APP" ? "APPS" : "SPACE";
+    xperienceEntryRef.current = entry;
+    setXperienceEntry(entry);
+    setRestoreNotice(null);
+    if (mode === "APP") {
+      void (app.experienced ? openApplication(app, "PUBLIC", "APP") : startApplication(app, "APP"));
       return;
     }
-    navigate("my-experience");
+    // Space consumption is public and local: no Directory server, membership call or App probe.
+    setError(null);
+    setFrameFailed(false);
+    setFrameReady(false);
+    setLaunchingApp(app);
+    setOpened(null);
+    setExperienceOfflineMessage(null);
+    setExitingExperience(false);
+    exitingRef.current = false;
+    navigate("experience");
+    openLocalExperience({ ...app, experienced: true }, "PUBLIC", "SPACE");
   };
+
+  const restoreNoticeView = restoreNotice ? (
+    <p className="ox-restore-notice" role="status" data-testid="restore-notice">
+      {restoreNotice}{" "}
+      <button type="button" className="ox-text-link" onClick={() => setRestoreNotice(null)}>
+        Dismiss
+      </button>
+    </p>
+  ) : null;
+  const readySpaceCount = spaceEntries.filter((entry) => entry.readiness === "READY_OFFLINE" || entry.readiness === "PREPARED").length;
+  const appsEntry = xperienceEntry === "APPS";
+  const switcherIsolation: ExperienceExecutionMode | null = xperienceEntry === "APPS" ? "APP" : xperienceEntry === "SPACE" ? executionMode : null;
 
   const renderGrid = (apps: DirectoryApplicationView[], options?: { home?: boolean; dense?: boolean }) => loading
     ? <Skeletons count={options?.home ? 4 : 6} home={options?.home} />
@@ -1614,6 +1754,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       <nav className="ox-side-nav" aria-label="Primary navigation">
         <button data-testid="nav-home" className={screen === "home" ? "active" : ""} onClick={() => navigate("home")}><Icon name="home" />Home</button>
         <button data-testid="nav-directory" className={screen === "directory" || screen === "search" || screen === "detail" ? "active" : ""} onClick={() => navigate("directory")}><Icon name="directory" />Directory</button>
+        <button data-testid="nav-xperience" className={XPERIENCE_SCREENS.includes(screen) ? "active" : ""} onClick={() => navigate("xperience")}><Icon name="xperience" />Xperience</button>
         <button data-testid="nav-my-experience" className={screen === "my-experience" ? "active" : ""} onClick={() => navigate("my-experience")}><Icon name="experience" />My Xperience</button>
         <button className={screen === "profile" ? "active" : ""} onClick={() => navigate("profile")}><Icon name="profile" />Profile</button>
       </nav>
@@ -1656,14 +1797,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       {error && screen !== "experience" ? <ErrorBanner message={error} onRetry={() => void load()} /> : null}
 
       {screen === "home" ? <div data-testid="home" className="ox-screen ox-home">
-        {restoreNotice ? (
-          <p className="ox-restore-notice" role="status" data-testid="restore-notice">
-            {restoreNotice}{" "}
-            <button type="button" className="ox-text-link" onClick={() => setRestoreNotice(null)}>
-              Dismiss
-            </button>
-          </p>
-        ) : null}
+        {restoreNoticeView}
         <div className="ox-home-search-wrap">
           <form data-testid="home-search" className="ox-home-search ox-objective" onSubmit={submitObjective}>
             <Icon name="search" />
@@ -1691,6 +1825,65 @@ export function ExperienceApp(props: ExperienceAppProps) {
         <div className="ox-filter-row" aria-label="Directory categories">{DIRECTORY_CATEGORIES.map((item) => <button className={category === item ? "active" : ""} key={item} onClick={() => setCategory(item)}>{item}</button>)}</div>
         {renderGrid(filteredDirectory, { dense: true })}
         {!loading && filteredDirectory.length === 0 ? <div className="ox-inline-empty"><p>No applications match this category.</p><button onClick={() => setCategory("All")}>Show all</button></div> : null}
+      </div> : null}
+
+      {screen === "xperience" ? <div data-testid="xperience-chooser" className="ox-screen ox-xperience">
+        <PageHeader eyebrow="XPERIENCE" title="What would you like to experience?" copy="The Directory shows what exists. Xperience runs it — as the provider's own App, or as its Space on this installation." />
+        {restoreNoticeView}
+        <div className="ox-xperience-choices">
+          <button type="button" className="ox-xperience-choice is-apps" data-testid="xperience-choice-apps" onClick={() => navigate("xperience-apps")}>
+            <span className="ox-xperience-choice-icon" aria-hidden="true"><Icon name="experience" /></span>
+            <small>Online-first experiences</small>
+            <strong>XPERIENCE APPS</strong>
+            <p>Open a provider&apos;s own app, live from its origin.</p>
+            <em data-testid="xperience-choice-apps-count">{appEntries.length} {appEntries.length === 1 ? "App" : "Apps"}{offline ? " · connection required" : ""}</em>
+          </button>
+          <button type="button" className="ox-xperience-choice is-space" data-testid="xperience-choice-space" onClick={() => navigate("xperience-space")}>
+            <span className="ox-xperience-choice-icon" aria-hidden="true"><Icon name="xperience" /></span>
+            <small>Offline-ready experiences</small>
+            <strong>XPERIENCE SPACE</strong>
+            <p>Enter a provider&apos;s Space from what this installation has prepared.</p>
+            <em data-testid="xperience-choice-space-count">{spaceEntries.length} {spaceEntries.length === 1 ? "Space" : "Spaces"} · {spaceEntries.some((entry) => entry.checking) ? "checking this installation…" : `${readySpaceCount} ready offline`}</em>
+          </button>
+        </div>
+      </div> : null}
+
+      {screen === "xperience-apps" ? <div data-testid="xperience-apps" className="ox-screen ox-xperience-browser">
+        <BackButton destination="xperience" />
+        <PageHeader eyebrow="XPERIENCE APPS" title="Xperience Apps" copy={offline ? "You're offline. Apps open live from their provider and need a connection." : "Online-first. Each opens the provider's own app."} />
+        {restoreNoticeView}
+        {appEntries.length ? <div className="ox-xperience-list">{appEntries.map(({ app, availability }) => (
+          <article key={app.id} className="ox-xperience-row" data-testid={`xperience-app-${app.id}`} data-availability={availability}>
+            <AppGlyph app={app} compact />
+            <div>
+              <small>{app.category}</small>
+              <strong>{app.name}</strong>
+              <span className="ox-mode-badges"><em className={availability === "AVAILABLE" ? "is-ok" : "is-blocked"}>{availability === "AVAILABLE" ? "AVAILABLE" : "CONNECTION REQUIRED"}</em></span>
+            </div>
+            <button type="button" className="ox-button primary compact" data-testid={`open-app-${app.id}`} disabled={busyId === app.id} onClick={() => launchFromXperience(app, "APP")}>
+              {busyId === app.id ? "Opening…" : "Open App"}
+            </button>
+          </article>
+        ))}</div> : <div className="ox-inline-empty"><p>No Xperience Apps are released on this installation.</p></div>}
+      </div> : null}
+
+      {screen === "xperience-space" ? <div data-testid="xperience-space" className="ox-screen ox-xperience-browser">
+        <BackButton destination="xperience" />
+        <PageHeader eyebrow="XPERIENCE SPACE" title="Xperience Space" copy="Offline-ready. Spaces run on this installation from what it has prepared." />
+        {restoreNoticeView}
+        {spaceEntries.length ? <div className="ox-xperience-list">{spaceEntries.map((entry) => (
+          <article key={entry.app.id} className="ox-xperience-row" data-testid={`xperience-space-${entry.app.id}`} data-readiness={entry.checking ? "CHECKING" : entry.readiness}>
+            <AppGlyph app={entry.app} compact />
+            <div>
+              <small>{entry.app.category}</small>
+              <strong>{entry.app.name}</strong>
+              <span className="ox-mode-badges"><em className={entry.readiness === "READY_OFFLINE" || entry.readiness === "PREPARED" ? "is-ok" : entry.enterable ? "" : "is-blocked"}>{entry.checking ? "CHECKING" : SPACE_READINESS_LABEL[entry.readiness]}</em></span>
+            </div>
+            <button type="button" className="ox-button primary compact" data-testid={`enter-space-${entry.app.id}`} disabled={!entry.enterable} onClick={() => launchFromXperience(entry.app, "SPACE")}>
+              Enter Space
+            </button>
+          </article>
+        ))}</div> : <div className="ox-inline-empty"><p>No Xperience Spaces are released on this installation.</p></div>}
       </div> : null}
 
       {screen === "search" ? <div data-testid="search" className="ox-screen">
@@ -1901,7 +2094,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
             {executionMode === "APP" ? <>
               <button type="button" className="ox-deliverable-trigger" aria-label="Xperience controls" data-testid="xperience-host-controls" aria-expanded={hostMenuOpen} onClick={() => setHostMenuOpen((open) => !open)}>☰</button>
               {hostMenuOpen ? <div className="ox-deliverable-menu" role="menu" aria-label="Xperience controls">
-                {modeSwitchAllowed && activeSpaceTarget ? <button type="button" role="menuitem" data-testid="switch-to-space" onClick={() => switchExecutionMode("SPACE")}>{EXECUTION_MODE_LABEL.SPACE}</button> : null}
+                {modeSwitchAllowed && activeSpaceTarget && !appsEntry ? <button type="button" role="menuitem" data-testid="switch-to-space" onClick={() => switchExecutionMode("SPACE")}>{EXECUTION_MODE_LABEL.SPACE}</button> : null}
                 {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); openSwitcher(); }}>Switch provider</button> : null}
                 {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); exitExperienceToHome(); }}>Leave Xperience</button> : null}
               </div> : null}
@@ -1914,7 +2107,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 {modeSwitchAllowed && activeAppTarget ? <button type="button" data-testid="switch-to-app" onClick={() => switchExecutionMode("APP")}>Return to App</button> : null}
               </div> : null}
             </>}
-            {spaceNotice ? <div className="ox-frame-note" role="status">{spaceNotice}</div> : null}
+            {spaceNotice ? <div className="ox-frame-note" role="status" data-testid="space-notice">{spaceNotice}</div> : null}
             {executionMode === "SPACE" && tvState !== "idle" ? <section className="ox-tv-surface" data-testid="space-tv" data-channel={tvChannelId ?? undefined}>
               {tvState === "preparing" ? <div role="status">Preparing broadcast...</div> : null}
               {tvState === "unavailable" ? <div role="status">Broadcast unavailable</div> : null}
@@ -1979,9 +2172,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 </button>
               </section>
             ) : null}
-            {frameFailed && executionMode === "SPACE" && !experienceOfflineMessage ? (
+            {(frameFailed || offline) && executionMode === "SPACE" && !experienceOfflineMessage ? (
               <div className="ox-frame-note" role="status" data-testid="space-provider-unreachable">
-                The live provider page is unreachable. This Space continues on this installation.
+                {offline
+                  ? "Offline. The live provider page needs a connection — this Space continues on this installation."
+                  : "The live provider page is unreachable. This Space continues on this installation."}
               </div>
             ) : null}
             {frameFailed && executionMode === "APP" && opened && !experienceOfflineMessage ? (
@@ -1996,7 +2191,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 </button>
               </section>
             ) : null}
-            {!experienceOfflineMessage && !frameFailed
+            {/* An offline Space never requests its provider's live page. */}
+            {!experienceOfflineMessage && !frameFailed && !(executionMode === "SPACE" && offline)
               ? mountedFrames.map((frame) => {
                   const active = frame.id === activeExperienceId;
                   return (
@@ -2017,6 +2213,11 @@ export function ExperienceApp(props: ExperienceAppProps) {
                       }}
                       onLoad={() => {
                         if (!active) return;
+                        if (executionMode === "SPACE") {
+                          // Space readiness is local preparation; its provider's App URL is never probed.
+                          setFrameReady(true);
+                          return;
+                        }
                         void (async () => {
                           // Error pages still fire onLoad; re-check reachability so we never
                           // leave a white WebView error covering the OS shell.
@@ -2039,7 +2240,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
               : null}
             <ExperienceSwitcher
               open={switcherOpen}
-              lineup={lineup}
+              lineup={isolateLineup(lineup, switcherIsolation)}
               activeId={activeExperienceId}
               onSelect={switchToExperience}
               onNext={switchNext}
@@ -2047,7 +2248,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
               onDismiss={dismissSwitcher}
               activeMode={executionMode}
               activeModes={activeTargets.map((target) => target.executionMode)}
-              modeSwitchAllowed={modeSwitchAllowed}
+              modeSwitchAllowed={modeSwitchAllowed && !appsEntry}
               onSelectMode={(mode) => { switchExecutionMode(mode); dismissSwitcher(); }}
               modesFor={(id) => {
                 const entry = lineup.find((item) => item.experienceId === id);
@@ -2061,7 +2262,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
     </main>
 
     {!isDesktop && screen !== "experience" ? (
-      <BottomNav screen={screen} go={navigate} onEnterXperience={enterXperienceFromNav} />
+      <BottomNav screen={screen} go={navigate} />
     ) : null}
     {stopTarget ? <div className="ox-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setStopTarget(null); }}>
       <section data-testid="stop-modal" className="ox-modal" role="dialog" aria-modal="true" aria-labelledby="stop-title"><span className="ox-modal-icon">◇</span><h2 id="stop-title">Unxperience {stopTarget.application.name}?</h2><p>This removes it from My Xperience. You can add it again from Directory at any time.</p><div><button className="ox-button secondary" onClick={() => setStopTarget(null)}>Cancel</button><button data-testid="confirm-stop" className="ox-button danger" disabled={busyId === stopTarget.applicationId} onClick={() => void confirmStop()}>Unxperience</button></div></section>

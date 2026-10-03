@@ -103,8 +103,22 @@ export {
   nextProviderWithMode,
   providerTarget,
   providerTargets,
+  requireExecutionTarget,
   type ProviderRef,
 } from "./targets.js";
+export {
+  SPACE_READINESS_LABEL,
+  XPERIENCE_ENTRY_MODE,
+  classifySpaceReadiness,
+  noRouteBroadcastSource,
+  spaceLocallyPlayable,
+  xperienceAppEntries,
+  xperienceSpaceCandidates,
+  type SpaceReadiness,
+  type XperienceAppEntry,
+  type XperienceEntry,
+  type XperienceSpaceCandidate,
+} from "./xperience-browsers.js";
 export {
   CATALOG_KEY,
   applyCatalogUpdate,

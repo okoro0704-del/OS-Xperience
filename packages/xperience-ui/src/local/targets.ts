@@ -63,6 +63,15 @@ export function chooseExecutionTarget(
   return (requested ? byMode(requested) : null) ?? byMode("APP") ?? available[0] ?? null;
 }
 
+/** An explicitly selected mode runs as that mode or not at all — never substituted with another. */
+export function requireExecutionTarget(
+  targets: ExperienceTarget[],
+  mode: ExperienceExecutionMode,
+  fixed?: ExperienceExecutionMode | null,
+): ExperienceTarget | null {
+  return chooseExecutionTarget(targets, mode, fixed ?? mode);
+}
+
 /** Next provider after `currentId` (wrapping) that offers `mode`; never the current provider. */
 export function nextProviderWithMode<T extends ProviderRef>(
   providers: T[],
