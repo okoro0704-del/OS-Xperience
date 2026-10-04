@@ -120,6 +120,24 @@ export {
   type XperienceSpaceCandidate,
 } from "./xperience-browsers.js";
 export {
+  SPACE_IMPORT_MESSAGE,
+  SPACE_REGISTRY_KEY,
+  findSpaceRegistration,
+  importSpaceLaunchFile,
+  readSpaceRegistrations,
+  registeredSpaceMode,
+  removeSpaceRegistration,
+  type SpaceImportCode,
+  type SpaceImportOptions,
+  type SpaceImportResult,
+  type SpaceRegistration,
+} from "./space-registry.js";
+export {
+  BUNDLED_SPACE_PUBLISHERS,
+  setTrustedSpacePublishersForTests,
+  trustedSpacePublishers,
+} from "./space-publishers.js";
+export {
   CATALOG_KEY,
   applyCatalogUpdate,
   catalogEntryLaunchable,

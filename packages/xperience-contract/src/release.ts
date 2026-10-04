@@ -217,7 +217,12 @@ export interface SignedExperienceCatalog {
 
 /** Deterministic JSON for signing — sorted object keys, no whitespace variance. */
 export function canonicalCatalogJson(payload: ExperienceCatalogPayload): string {
-  return JSON.stringify(sortKeys(payload));
+  return canonicalJson(payload);
+}
+
+/** The signing canonicalization shared by every signed Xperience artifact. */
+export function canonicalJson(value: unknown): string {
+  return JSON.stringify(sortKeys(value));
 }
 
 function sortKeys(value: unknown): unknown {

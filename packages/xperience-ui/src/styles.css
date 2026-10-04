@@ -1041,6 +1041,8 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .ox-xperience-row .ox-mode-badges em.is-ok { color: var(--ox-success); background: rgba(47, 214, 122, .12); }
 .ox-xperience-row .ox-mode-badges em.is-blocked { color: var(--ox-warning); background: rgba(240, 180, 41, .12); }
 .ox-xperience-row .ox-button:disabled { cursor: not-allowed; }
+.ox-xperience-row > .ox-xperience-row-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.ox-space-import { display: grid; justify-items: start; gap: 8px; margin-bottom: 12px; }
 .ox-xperience-browser > .ox-icon-button { margin-bottom: 6px; }
 @media (min-width: 720px) {
   .ox-xperience-choices { grid-template-columns: 1fr 1fr; }

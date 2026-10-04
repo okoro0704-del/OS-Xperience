@@ -630,6 +630,7 @@ export {
   canLaunchByRelease,
   canPreloadByRelease,
   canonicalCatalogJson,
+  canonicalJson,
   generateCatalogSigningKeyPair,
   importCatalogPublicKey,
   importCatalogPrivateKey,
@@ -681,4 +682,26 @@ export {
   type OxUpdateDecision,
   type OxInstalledVersions,
 } from "./update.js";
+
+export {
+  SPACE_LAUNCH_CAPABILITIES,
+  SPACE_LAUNCH_EXTENSION,
+  SPACE_LAUNCH_FORMAT,
+  SPACE_LAUNCH_MAX_BYTES,
+  SPACE_LAUNCH_MIME,
+  SPACE_LAUNCH_SCHEMA_VERSION,
+  SPACE_RUNTIME_CONTRACT_VERSION,
+  isSpaceLaunchFile,
+  serializeSpaceLaunchFile,
+  signSpaceLaunchFile,
+  spaceLaunchSignedContent,
+  verifySpaceLaunchFile,
+  type SpaceLaunchErrorCode,
+  type SpaceLaunchFile,
+  type SpaceLaunchPayload,
+  type SpaceLaunchStage,
+  type SpaceLaunchVerification,
+  type SpaceLaunchVerifyOptions,
+  type TrustedSpacePublisher,
+} from "./space-launch.js";
 

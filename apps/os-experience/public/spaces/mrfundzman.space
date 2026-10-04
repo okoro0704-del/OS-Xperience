@@ -1,0 +1,36 @@
+{
+  "format": "digiconomy.space",
+  "schemaVersion": 1,
+  "payload": {
+    "providerId": "bootstrap.mybrandos.public",
+    "publisherId": "mybrandos",
+    "version": "1.0.0",
+    "presentation": {
+      "name": "MrFundzMan",
+      "description": "MrFundzMan TV, the public mybrandOS Space."
+    },
+    "execution": {
+      "mode": "SPACE",
+      "broadcastChannelId": "mrfundzman.tv"
+    },
+    "capabilities": [
+      "space.tv"
+    ],
+    "preparation": {
+      "kind": "BROADCAST"
+    },
+    "compatibility": {
+      "minimumXperienceVersion": "0.3.6",
+      "minimumSpaceRuntimeVersion": 1
+    }
+  },
+  "integrity": {
+    "algorithm": "SHA-256",
+    "digest": "90c33cbcd6ca7c733320b500e5dd3765ba546dbf56276289e942a23f6ee8dc9f"
+  },
+  "signature": {
+    "algorithm": "Ed25519",
+    "keyId": "mybrandos-space-2026-10",
+    "value": "t71ONPV+4OJiH0xTvlNoZAB5/QVW51liOfWWK6Rhz4hudpW2lLkhwbuN/Fz5p3frMGpY5Xpsn0591xL+RrLuDg=="
+  }
+}

@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { cleartextPolicyProblems } from "./android-network-policy.mjs";
 
 const release = process.argv.includes("--release");
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -93,6 +94,12 @@ function buildTool(name) {
   return join(dir, latest, name);
 }
 
+/** The debug-only loopback allowance (src/debug) must never reach a release: no host may permit cleartext. */
+function assertCleartextForbidden(apk) {
+  const problems = cleartextPolicyProblems(buildTool("aapt.exe"), apk);
+  if (problems.length) fail(`release APK: ${problems.join("; ")}`);
+}
+
 function verifyReleaseApk(apk) {
   const versions = JSON.parse(readFileSync(join(appDir, "ox-versions.json"), "utf8"));
   const record = JSON.parse(readFileSync(signingRecord, "utf8"));
@@ -113,6 +120,7 @@ function verifyReleaseApk(apk) {
 
   const entries = capture(buildTool("aapt.exe"), ["list", apk]);
   if (/^assets\/public\/releases\//m.test(entries)) fail("release APK bundles public/releases");
+  assertCleartextForbidden(apk);
 
   const certs = capture(join(jbr, "bin", "java.exe"), ["-jar", buildTool(join("lib", "apksigner.jar")), "verify", "--print-certs", apk]);
   const signers = [...certs.matchAll(/Signer #\d+ certificate SHA-256 digest: ([0-9a-f]{64})/g)].map((m) => m[1]);

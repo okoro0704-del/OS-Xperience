@@ -7,6 +7,7 @@ import {
 import { MYBRANDOS_PUBLIC_ID, bootstrapPublicEntry } from "./bootstrap.js";
 import { readSignedCatalog, signedCatalogGovernsExecution } from "./catalog.js";
 import { findRegistryEntry } from "./registry.js";
+import { registeredSpaceMode } from "./space-registry.js";
 
 export interface ProviderRef {
   id: string;
@@ -23,6 +24,14 @@ function declaredModes(provider: ProviderRef): CatalogExecutionTarget[] | undefi
   return undefined;
 }
 
+/** A verified Space Launch File registration contributes the SPACE mode only; the provider's APP stays as declared. */
+function withRegisteredSpace(providerId: string, modes: CatalogExecutionTarget[] | undefined): CatalogExecutionTarget[] | undefined {
+  const registered = registeredSpaceMode(providerId);
+  if (!registered) return modes;
+  const base = modes?.length ? modes : [{ mode: "APP" as const }];
+  return base.some((mode) => mode.mode === "SPACE") ? base : [...base, registered];
+}
+
 /**
  * All declared (provider, mode) targets. A verified signed catalog entry is authoritative for
  * release, visibility and modes. Local registry data is used only when no governing catalog exists;
@@ -35,7 +44,7 @@ export function providerTargets(provider: ProviderRef): ExperienceTarget[] {
   if (catalogEntry) {
     return resolveExperienceTargets({ ...catalogEntry, entrypoint: entrypoint || catalogEntry.entrypoint });
   }
-  const declared = resolveExperienceTargets({ experienceId: provider.id, entrypoint, executionModes: declaredModes(provider) });
+  const declared = resolveExperienceTargets({ experienceId: provider.id, entrypoint, executionModes: withRegisteredSpace(provider.id, declaredModes(provider)) });
   if (!signedCatalogGovernsExecution(catalog)) return declared;
   return declared.map((target) => ({ ...target, availability: "NOT_RELEASED" as const }));
 }

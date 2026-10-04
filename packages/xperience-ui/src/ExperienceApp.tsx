@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import { createHttpBroadcastSource, hydrateAndPrepareSpaceTv, IndexedDbBroadcastHydrationStore, localMediaBlob } from "@digiconomy/offline-kernel";
 import {
   DIRECTORY_CATEGORIES,
   parseExperienceUtterance,
+  SPACE_LAUNCH_EXTENSION,
+  SPACE_LAUNCH_MAX_BYTES,
+  SPACE_LAUNCH_MIME,
   type ApplicationSurfaceType,
   type DirectoryApplicationView,
   type ExperienceExecutionMode,
@@ -43,13 +46,18 @@ import {
   resolveDirectoryProviders,
   resolveMemberships,
   shellAuthPosture,
+  SPACE_IMPORT_MESSAGE,
   SPACE_READINESS_LABEL,
   classifySpaceReadiness,
+  importSpaceLaunchFile,
+  readSpaceRegistrations,
+  removeSpaceRegistration,
   spaceLocallyPlayable,
   storeCatalogPublicKey,
   xperienceAppEntries,
   xperienceSpaceCandidates,
   type LineupEntry,
+  type SpaceImportCode,
   type XperienceEntry,
 } from "./local/index.js";
 import { ExperienceSwitcher, attachDoubleTap } from "./switcher/index.js";
@@ -113,6 +121,8 @@ export interface ExperienceAppProps {
   online?: boolean | null;
   /** Host's generated runtime version stamp, recorded on the local installation. */
   runtimeVersion?: string;
+  /** OS Xperience product version (semver), checked against a Space Launch File's minimum. */
+  xperienceVersion?: string;
 }
 
 type Screen =
@@ -134,6 +144,20 @@ type Participant = { id: string; role: string; email?: string | null; displayNam
 const env = (import.meta as ImportMeta & {
   env?: Record<string, string | undefined>;
 }).env;
+
+/**
+ * Picker filter for Import Space — acquisition only. Android types `.space` as application/octet-stream and
+ * Capacitor drops extensions Android cannot map, so without it the standard picker disables every launch file.
+ * Whatever is picked still passes the full verifier before anything is registered.
+ */
+const SPACE_IMPORT_ACCEPT = [SPACE_LAUNCH_EXTENSION, SPACE_LAUNCH_MIME, "application/octet-stream"].join(",");
+
+/** Broadcast route for preparing a Space: host-injected, else the signed launch file's endpoint, else installation config. */
+function broadcastBaseFor(providerId: string | null): string | undefined {
+  const injected = typeof window !== "undefined" ? (window as Window & { __oxBroadcastApiBase?: string }).__oxBroadcastApiBase : undefined;
+  const registered = providerId ? readSpaceRegistrations().find((item) => item.providerId === providerId)?.preparationEndpoint : undefined;
+  return injected ?? registered ?? env?.VITE_MYBRANDOS_PUBLIC_API_BASE;
+}
 
 function initials(value: string): string {
   return (
@@ -411,6 +435,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [revealBanner, setRevealBanner] = useState<{ id: string; name: string } | null>(null);
   const [xperienceEntry, setXperienceEntry] = useState<XperienceEntry | null>(null);
   const [spacePlayable, setSpacePlayable] = useState<Record<string, boolean> | null>(null);
+  /** Bumped when a Space registration or its prepared state changes. */
+  const [spaceRevision, setSpaceRevision] = useState(0);
+  const [spaceImport, setSpaceImport] = useState<{ code: SpaceImportCode | "REGISTERED" | "UPDATED"; pending?: Uint8Array; offeredVersion?: string } | null>(null);
+  const [preparingSpaceId, setPreparingSpaceId] = useState<string | null>(null);
+  const [prepareNotice, setPrepareNotice] = useState<string | null>(null);
+  const spaceFileRef = useRef<HTMLInputElement | null>(null);
   const xperienceEntryRef = useRef<XperienceEntry | null>(null);
   const bootRestoreDoneRef = useRef(false);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -1568,8 +1598,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
           executionModes: activeProvider?.executionModes,
         })
       : [],
-    // catalogRevision: targets re-resolve when a newly verified signed catalog is stored.
-    [activeExperienceId, activeProvider, catalogRevision],
+    // catalogRevision / spaceRevision: targets re-resolve when a verified catalog or Space registration changes.
+    [activeExperienceId, activeProvider, catalogRevision, spaceRevision],
   );
   const activeAppTarget = activeTargets.find((target) => target.executionMode === "APP") ?? null;
   const activeSpaceTarget = activeTargets.find((target) => target.executionMode === "SPACE") ?? null;
@@ -1578,7 +1608,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
   const openTv = useCallback(async () => {
     setTvState("preparing"); setSpaceNotice(null);
-    const base = (window as Window & { __oxBroadcastApiBase?: string }).__oxBroadcastApiBase ?? (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env?.VITE_MYBRANDOS_PUBLIC_API_BASE;
+    const base = broadcastBaseFor(activeExperienceId);
     if (!tvChannelId) { setTvState("unavailable"); return; }
     try {
       const store = new IndexedDbBroadcastHydrationStore();
@@ -1592,7 +1622,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       if (tvUrlRef.current) URL.revokeObjectURL(tvUrlRef.current);
       tvUrlRef.current = URL.createObjectURL(blob); setTvSource(tvUrlRef.current); setTvTitle(playback.media.title); setTvState("playing");
     } catch { setTvState("unavailable"); }
-  }, [offline, tvChannelId]);
+  }, [activeExperienceId, offline, tvChannelId]);
 
   const revolveSpace = useCallback(() => {
     const id = activeIdRef.current;
@@ -1647,8 +1677,52 @@ export function ExperienceApp(props: ExperienceAppProps) {
   );
   const spaceCandidates = useMemo(
     () => xperienceSpaceCandidates(xperienceProviders),
-    [xperienceProviders, catalogRevision],
+    [xperienceProviders, catalogRevision, spaceRevision],
   );
+  const spaceRegistrations = useMemo(() => readSpaceRegistrations(), [spaceRevision]);
+
+  const importSpace = async (bytes: Uint8Array, acceptUpdate = false) => {
+    const result = await importSpaceLaunchFile(bytes, { xperienceVersion: props.xperienceVersion ?? "0.0.0", acceptUpdate });
+    if (result.ok) {
+      setSpaceImport({ code: result.outcome });
+      setSpaceRevision((value) => value + 1);
+      return;
+    }
+    setSpaceImport({ code: result.code, ...(result.code === "UPDATE_AVAILABLE" ? { pending: bytes, offeredVersion: result.offeredVersion } : {}) });
+  };
+
+  const onSpaceFileChosen = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+    // The picker admits any octet-stream: refuse oversized picks before reading them into memory.
+    if (file.size > SPACE_LAUNCH_MAX_BYTES) {
+      setSpaceImport({ code: "LAUNCH_FILE_TOO_LARGE" });
+      return;
+    }
+    try {
+      await importSpace(new Uint8Array(await file.arrayBuffer()));
+    } catch {
+      setSpaceImport({ code: "IMPORT_FAILED" });
+    }
+  };
+
+  // Preparation acquires published state into the Offline Kernel; the launch file itself carries none of it.
+  const prepareSpace = async (providerId: string, channelId: string) => {
+    const base = broadcastBaseFor(providerId);
+    if (!base || offline) { setPrepareNotice("Preparing this Space needs a connection and a broadcast route on this installation."); return; }
+    setPreparingSpaceId(providerId);
+    setPrepareNotice(null);
+    try {
+      const result = await hydrateAndPrepareSpaceTv({ channelId, routeAvailable: true, now: () => new Date(), store: new IndexedDbBroadcastHydrationStore(), source: createHttpBroadcastSource(base) });
+      if (result.state !== "LOCAL_PLAYING") setPrepareNotice("This Space couldn't be prepared yet. Try again while connected.");
+    } catch {
+      setPrepareNotice("This Space couldn't be prepared yet. Try again while connected.");
+    } finally {
+      setPreparingSpaceId(null);
+      setSpaceRevision((value) => value + 1);
+    }
+  };
   const spaceEntries = spaceCandidates.map((candidate) => {
     const checking = Boolean(candidate.target && candidate.channelId && spacePlayable === null);
     const classified = classifySpaceReadiness({
@@ -1871,19 +1945,45 @@ export function ExperienceApp(props: ExperienceAppProps) {
         <BackButton destination="xperience" />
         <PageHeader eyebrow="XPERIENCE SPACE" title="Xperience Space" copy="Offline-ready. Spaces run on this installation from what it has prepared." />
         {restoreNoticeView}
-        {spaceEntries.length ? <div className="ox-xperience-list">{spaceEntries.map((entry) => (
-          <article key={entry.app.id} className="ox-xperience-row" data-testid={`xperience-space-${entry.app.id}`} data-readiness={entry.checking ? "CHECKING" : entry.readiness}>
-            <AppGlyph app={entry.app} compact />
+        <div className="ox-space-import">
+          <input ref={spaceFileRef} type="file" accept={SPACE_IMPORT_ACCEPT} hidden data-testid="space-import-input" onChange={(event) => void onSpaceFileChosen(event)} />
+          <button type="button" className="ox-button compact" data-testid="import-space" onClick={() => spaceFileRef.current?.click()}>Import Space</button>
+          {spaceImport ? (
+            <p className="ox-restore-notice" role="status" data-testid="space-import-status" data-code={spaceImport.code}>
+              {SPACE_IMPORT_MESSAGE[spaceImport.code]}
+              {spaceImport.pending ? <> <button type="button" className="ox-text-link" data-testid="space-import-accept-update" onClick={() => void importSpace(spaceImport.pending!, true)}>Update to {spaceImport.offeredVersion}</button></> : null}
+            </p>
+          ) : null}
+          {prepareNotice ? <p className="ox-restore-notice" role="status" data-testid="space-prepare-notice">{prepareNotice}</p> : null}
+        </div>
+        {spaceEntries.length ? <div className="ox-xperience-list">{spaceEntries.map((entry) => {
+          const registration = spaceRegistrations.find((item) => item.providerId === entry.app.id) ?? null;
+          return (
+          <article key={entry.app.id} className="ox-xperience-row" data-testid={`xperience-space-${entry.app.id}`} data-readiness={entry.checking ? "CHECKING" : entry.readiness} data-registered={registration ? "true" : "false"}>
+            <AppGlyph app={registration ? { ...entry.app, name: registration.name } : entry.app} compact />
             <div>
-              <small>{entry.app.category}</small>
-              <strong>{entry.app.name}</strong>
+              <small>{registration ? `${registration.publisherName} · v${registration.version}` : entry.app.category}</small>
+              <strong>{registration?.name ?? entry.app.name}</strong>
               <span className="ox-mode-badges"><em className={entry.readiness === "READY_OFFLINE" || entry.readiness === "PREPARED" ? "is-ok" : entry.enterable ? "" : "is-blocked"}>{entry.checking ? "CHECKING" : SPACE_READINESS_LABEL[entry.readiness]}</em></span>
             </div>
-            <button type="button" className="ox-button primary compact" data-testid={`enter-space-${entry.app.id}`} disabled={!entry.enterable} onClick={() => launchFromXperience(entry.app, "SPACE")}>
-              Enter Space
-            </button>
+            <div className="ox-xperience-row-actions">
+              {!entry.checking && entry.readiness === "NOT_PREPARED" && entry.channelId ? (
+                <button type="button" className="ox-button compact" data-testid={`prepare-space-${entry.app.id}`} disabled={preparingSpaceId !== null} onClick={() => void prepareSpace(entry.app.id, entry.channelId!)}>
+                  {preparingSpaceId === entry.app.id ? "Preparing…" : "Prepare"}
+                </button>
+              ) : null}
+              <button type="button" className="ox-button primary compact" data-testid={`enter-space-${entry.app.id}`} disabled={!entry.enterable || preparingSpaceId === entry.app.id} onClick={() => launchFromXperience(entry.app, "SPACE")}>
+                Enter Space
+              </button>
+              {registration ? (
+                <button type="button" className="ox-text-link" data-testid={`remove-space-${entry.app.id}`} onClick={() => { removeSpaceRegistration(entry.app.id); setSpaceImport(null); setSpaceRevision((value) => value + 1); }}>
+                  Remove registration
+                </button>
+              ) : null}
+            </div>
           </article>
-        ))}</div> : <div className="ox-inline-empty"><p>No Xperience Spaces are released on this installation.</p></div>}
+          );
+        })}</div> : <div className="ox-inline-empty"><p>No Xperience Spaces are released on this installation.</p></div>}
       </div> : null}
 
       {screen === "search" ? <div data-testid="search" className="ox-screen">

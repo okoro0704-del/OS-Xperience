@@ -1,0 +1,13 @@
+{
+  "providerId": "bootstrap.mybrandos.public",
+  "publisherId": "mybrandos",
+  "version": "1.0.0",
+  "presentation": {
+    "name": "MrFundzMan",
+    "description": "MrFundzMan TV, the public mybrandOS Space."
+  },
+  "execution": { "mode": "SPACE", "broadcastChannelId": "mrfundzman.tv" },
+  "capabilities": ["space.tv"],
+  "preparation": { "kind": "BROADCAST" },
+  "compatibility": { "minimumXperienceVersion": "0.3.6", "minimumSpaceRuntimeVersion": 1 }
+}
