@@ -6,6 +6,7 @@ import { attachNativeShellBridge, openExternalUrl } from "./native-bridge.js";
 import { BootWatchdog, ShellErrorBoundary, UpdateGate } from "./UpdateGate.js";
 import { markBootPhase } from "./boot.js";
 import { OX_NATIVE_VERSION, OX_RUNTIME_VERSION } from "./ox-version-stamp.js";
+import { createSpaceHomeEntryHost, readInitialSpaceLaunch } from "./space-home-entry.js";
 
 markBootPhase("NATIVE_START");
 
@@ -16,7 +17,9 @@ if ("serviceWorker" in navigator && !Capacitor.isNativePlatform()) {
   });
 }
 
-function NativeShellApp() {
+const spaceHomeEntryHost = createSpaceHomeEntryHost();
+
+function NativeShellApp({ initialSpaceLaunch }: { initialSpaceLaunch: unknown }) {
   const backHandlerRef = useRef<(() => boolean) | null>(null);
   const [online, setOnline] = useState<boolean | null>(null);
 
@@ -44,6 +47,8 @@ function NativeShellApp() {
             runtimeVersion={OX_RUNTIME_VERSION}
             xperienceVersion={OX_NATIVE_VERSION}
             openExternalUrl={openExternalUrl}
+            spaceHomeEntryHost={spaceHomeEntryHost}
+            initialSpaceLaunch={initialSpaceLaunch}
             onHardwareBackReady={(handler) => {
               backHandlerRef.current = handler;
             }}
@@ -59,7 +64,10 @@ if (!rootEl) {
   document.body.innerHTML =
     '<main style="font-family:system-ui;padding:24px;background:#05070f;color:#fff;min-height:100vh"><h1>OS Xperience</h1><p>Root element missing.</p></main>';
 } else {
-  createRoot(rootEl).render(<NativeShellApp />);
+  const root = createRoot(rootEl);
+  void readInitialSpaceLaunch(spaceHomeEntryHost).then((initialSpaceLaunch) => {
+    root.render(<NativeShellApp initialSpaceLaunch={initialSpaceLaunch} />);
+  });
 }
 
 // Hide native splash as soon as the JS shell paints — do not wait on Experience restore.

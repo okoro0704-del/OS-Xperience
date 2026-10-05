@@ -1044,6 +1044,36 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .ox-xperience-row > .ox-xperience-row-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .ox-space-import { display: grid; justify-items: start; gap: 8px; margin-bottom: 12px; }
 .ox-xperience-browser > .ox-icon-button { margin-bottom: 6px; }
+.ox-space-manage { grid-column: 1 / -1; display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--ox-border); }
+.ox-space-manage dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px 14px; margin: 0; }
+.ox-space-manage dl div { display: grid; gap: 2px; min-width: 0; }
+.ox-space-manage dt { color: var(--ox-text-secondary); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.ox-space-manage dd { margin: 0; overflow-wrap: anywhere; font-size: 13px; }
+.ox-space-manage-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ox-space-manage-help { margin: 0; color: var(--ox-text-secondary); font-size: 12px; line-height: 1.5; }
+.ox-xperience-row .ox-mode-badges { flex-wrap: wrap; }
+.ox-xperience-row .ox-mode-badges em { white-space: nowrap; }
+@media (max-width: 520px) {
+  .ox-xperience-row { grid-template-columns: auto minmax(0, 1fr); }
+  .ox-xperience-row > .ox-xperience-row-actions { grid-column: 1 / -1; justify-content: flex-start; }
+}
+.ox-space-install { display: grid; justify-items: start; gap: 10px; margin-top: 14px; padding: clamp(18px, 4vw, 26px); border: 1px solid rgba(80, 210, 180, .28); border-radius: var(--ox-radius-lg); background: linear-gradient(150deg, rgba(18, 58, 66, .9), rgba(8, 16, 24, .94)); }
+.ox-space-install small { color: #6fe0c8; font-size: 10px; font-weight: 500; letter-spacing: .1em; }
+.ox-space-install h2 { margin: 0; font-family: "Outfit", sans-serif; font-size: clamp(22px, 3.6vw, 28px); font-weight: 600; }
+.ox-space-install p { margin: 0; color: var(--ox-text-secondary); font-size: 13px; line-height: 1.5; }
+.ox-space-install .ox-button.wide { width: 100%; }
+.ox-space-steps { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; color: var(--ox-success); font-size: 13px; }
+.ox-space-install .ox-space-ready { color: var(--ox-success); font-weight: 600; }
+.ox-space-preparing { display: grid; gap: 6px; width: 100%; }
+.ox-space-preparing p { margin: 0; color: var(--ox-text-secondary); font-size: 13px; }
+.ox-progress { position: relative; display: block; width: 100%; height: 4px; overflow: hidden; border-radius: 999px; background: rgba(111, 224, 200, .14); }
+.ox-progress.is-indeterminate i { position: absolute; inset: 0 auto 0 0; width: 35%; border-radius: inherit; background: #6fe0c8; animation: ox-progress-slide 1.2s var(--ox-ease) infinite; }
+@keyframes ox-progress-slide { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+.ox-space-launch { display: grid; min-height: 70vh; place-items: center; }
+.ox-space-launch-card { display: grid; justify-items: center; gap: 12px; max-width: 420px; padding: 28px; text-align: center; }
+.ox-space-launch-card h1 { margin: 0; font-family: "Outfit", sans-serif; font-size: clamp(24px, 4vw, 32px); font-weight: 600; }
+.ox-space-launch-card p { margin: 0; color: var(--ox-text-secondary); line-height: 1.5; }
+@media (prefers-reduced-motion: reduce) { .ox-progress.is-indeterminate i { animation: none; width: 100%; opacity: .5; } }
 @media (min-width: 720px) {
   .ox-xperience-choices { grid-template-columns: 1fr 1fr; }
   .ox-xperience-choice { min-height: 260px; }

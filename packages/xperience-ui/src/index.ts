@@ -106,4 +106,6 @@ export {
   writeRuntimeMode,
 } from "./local/index.js";
 export type { XperienceBootResult, ShellAuthPosture, KvStore, LineupEntry, SwitchPlan } from "./local/index.js";
+export { SPACE_LAUNCH_ACTION, SPACE_LAUNCH_EXTRA } from "./local/index.js";
+export type { SpaceHomeEntryHost, SpaceShortcutRequest } from "./local/index.js";
 export { ExperienceSwitcher, attachDoubleTap, classifyDoubleTap } from "./switcher/index.js";

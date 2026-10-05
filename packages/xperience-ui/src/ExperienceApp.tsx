@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { createHttpBroadcastSource, hydrateAndPrepareSpaceTv, IndexedDbBroadcastHydrationStore, localMediaBlob } from "@digiconomy/offline-kernel";
+import { createHttpBroadcastSource, deletePreparedChannel, hydrateAndPrepareSpaceTv, IndexedDbBroadcastHydrationStore, localMediaBlob } from "@digiconomy/offline-kernel";
 import {
   DIRECTORY_CATEGORIES,
   parseExperienceUtterance,
@@ -56,8 +56,25 @@ import {
   storeCatalogPublicKey,
   xperienceAppEntries,
   xperienceSpaceCandidates,
+  bundledSpaceArtifact,
+  findSpaceHomeEntry,
+  findSpaceRegistration,
+  parseSpaceLaunch,
+  readSpaceHomeEntries,
+  recordSpaceHomeEntry,
+  removeSpaceHomeEntry,
+  resolveInstalledSpace,
+  spaceHomeEntryEligibility,
+  spaceHomeEntryState,
+  spaceInstallationStage,
+  spaceShortcutId,
+  spaceShortcutRequest,
+  staleSpaceShortcuts,
   type LineupEntry,
+  type SpaceHomeEntryHost,
+  type SpaceHomeEntryState,
   type SpaceImportCode,
+  type SpaceReadiness,
   type XperienceEntry,
 } from "./local/index.js";
 import { ExperienceSwitcher, attachDoubleTap } from "./switcher/index.js";
@@ -123,10 +140,34 @@ export interface ExperienceAppProps {
   runtimeVersion?: string;
   /** OS Xperience product version (semver), checked against a Space Launch File's minimum. */
   xperienceVersion?: string;
+  /** Native launcher integration for Space home entries; absent where the platform has none. */
+  spaceHomeEntryHost?: SpaceHomeEntryHost | null;
+  /** Untrusted launch request the host received at cold start (a Space home entry tap). */
+  initialSpaceLaunch?: unknown;
 }
+
+type SpaceLaunchStatus = "OPENING" | "NOT_READY" | "UNAVAILABLE" | "NOT_INSTALLED" | "INVALID";
+type SpaceLaunchView = { status: SpaceLaunchStatus; spaceId?: string; name?: string; readiness?: SpaceReadiness; channelId?: string | null };
+
+/** What the launch screen may show before anything is resolved: the recorded label only, never content. */
+function openingSpaceLaunch(raw: unknown): SpaceLaunchView {
+  const parsed = parseSpaceLaunch(raw);
+  if (!parsed.ok) return { status: "OPENING" };
+  const entry = findSpaceHomeEntry(parsed.spaceId);
+  return { status: "OPENING", spaceId: parsed.spaceId, ...(entry ? { name: entry.label } : {}) };
+}
+
+const HOME_ENTRY_LABEL: Record<SpaceHomeEntryState, string> = {
+  UNSUPPORTED: "Not available on this platform",
+  NOT_ELIGIBLE: "Not available",
+  AVAILABLE: "Not added",
+  REQUESTED: "Not confirmed by the launcher",
+  INSTALLED: "On your Home Screen",
+};
 
 type Screen =
   | "home"
+  | "space-launch"
   | "directory"
   | "my-experience"
   | "profile"
@@ -376,7 +417,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
     displayName: userName,
   }), [apiBase, userId, userName]);
 
-  const [screen, setScreen] = useState<Screen>("home");
+  // A home-entry tap opens straight into the launch screen: OS Xperience Home is never shown first.
+  const [screen, setScreen] = useState<Screen>(() => (props.initialSpaceLaunch != null ? "space-launch" : "home"));
   const [screenStack, setScreenStack] = useState<Screen[]>([]);
   const [directory, setDirectory] = useState<DirectoryApplicationView[]>([]);
   const [featured, setFeatured] = useState<DirectoryApplicationView[]>([]);
@@ -437,9 +479,24 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [spacePlayable, setSpacePlayable] = useState<Record<string, boolean> | null>(null);
   /** Bumped when a Space registration or its prepared state changes. */
   const [spaceRevision, setSpaceRevision] = useState(0);
+  const playableCheckKeyRef = useRef("");
   const [spaceImport, setSpaceImport] = useState<{ code: SpaceImportCode | "REGISTERED" | "UPDATED"; pending?: Uint8Array; offeredVersion?: string } | null>(null);
   const [preparingSpaceId, setPreparingSpaceId] = useState<string | null>(null);
   const [prepareNotice, setPrepareNotice] = useState<string | null>(null);
+  const homeEntryHost = props.spaceHomeEntryHost ?? null;
+  const [homeEntrySupported, setHomeEntrySupported] = useState(false);
+  const [pinnedShortcuts, setPinnedShortcuts] = useState<string[]>([]);
+  const [homeEntryNotice, setHomeEntryNotice] = useState<string | null>(null);
+  const pendingPinRef = useRef<{ spaceId: string; name: string } | null>(null);
+  const [spaceManageId, setSpaceManageId] = useState<string | null>(null);
+  const [deleteOfflineTarget, setDeleteOfflineTarget] = useState<{ providerId: string; name: string; channelId: string } | null>(null);
+  const [storagePersisted, setStoragePersisted] = useState<boolean | null>(null);
+  const [spaceLaunch, setSpaceLaunch] = useState<SpaceLaunchView | null>(() => (props.initialSpaceLaunch != null ? openingSpaceLaunch(props.initialSpaceLaunch) : null));
+  const pendingSpaceLaunchRef = useRef<unknown>(props.initialSpaceLaunch ?? null);
+  const localBootDoneRef = useRef(false);
+  const autoplaySpaceRef = useRef<string | null>(null);
+  const leaveSpaceLaunchRef = useRef<() => void>(() => undefined);
+  const processSpaceLaunchRef = useRef<(raw: unknown, context?: { apps?: DirectoryApplicationView[]; online?: boolean }) => Promise<void>>(async () => undefined);
   const spaceFileRef = useRef<HTMLInputElement | null>(null);
   const xperienceEntryRef = useRef<XperienceEntry | null>(null);
   const bootRestoreDoneRef = useRef(false);
@@ -799,7 +856,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
       });
       setError(null);
 
-      const bootRestorePending = !bootRestoreDoneRef.current;
+      // A home-entry launch decides what opens: the previous Experience is not restored underneath it.
+      const pendingLaunch = pendingSpaceLaunchRef.current;
+      pendingSpaceLaunchRef.current = null;
+      const bootRestorePending = !bootRestoreDoneRef.current && pendingLaunch == null;
       bootRestoreDoneRef.current = true;
       if (local.restore && bootRestorePending) {
         try {
@@ -860,6 +920,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
           setRestoreNotice("OS Xperience could not restore the previous Experience. Returning Home.");
           navigate("home", { replace: true });
         }
+      }
+
+      // Resolved from local state only, before any Directory or catalog request.
+      const lateLaunch = pendingSpaceLaunchRef.current;
+      pendingSpaceLaunchRef.current = null;
+      localBootDoneRef.current = true;
+      const launch = pendingLaunch ?? lateLaunch;
+      if (launch != null) {
+        void processSpaceLaunchRef.current(launch, { apps: [...local.memberships.map((item) => item.application), ...local.directory], online: isOnline });
       }
 
       // Local shell is usable immediately — never hold skeletons on network/probe.
@@ -1029,6 +1098,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
       const parent: Screen = current === "xperience" ? "home" : "xperience";
       setScreenStack((stack) => stack.filter((item) => !XPERIENCE_SCREENS.includes(item) && item !== "experience"));
       setScreen(parent);
+      return true;
+    }
+    if (current === "space-launch") {
+      leaveSpaceLaunchRef.current();
       return true;
     }
     if (current === "detail") {
@@ -1686,6 +1759,14 @@ export function ExperienceApp(props: ExperienceAppProps) {
     if (result.ok) {
       setSpaceImport({ code: result.outcome });
       setSpaceRevision((value) => value + 1);
+      // A newer version keeps the same home entry; only its trusted label is refreshed.
+      const { providerId, name } = result.registration;
+      if (result.outcome === "UPDATED" && findSpaceHomeEntry(providerId)) {
+        recordSpaceHomeEntry({ spaceId: providerId, name, source: "LAUNCH_FILE" });
+        if (homeEntryHost && pinnedShortcuts.includes(spaceShortcutId(providerId))) {
+          await homeEntryHost.update(spaceShortcutRequest({ spaceId: providerId, name })).catch(() => undefined);
+        }
+      }
       return;
     }
     setSpaceImport({ code: result.code, ...(result.code === "UPDATE_AVAILABLE" ? { pending: bytes, offeredVersion: result.offeredVersion } : {}) });
@@ -1737,9 +1818,18 @@ export function ExperienceApp(props: ExperienceAppProps) {
 
   // Space readiness reads only the local Offline Kernel store — no Directory, App or broadcast request.
   useEffect(() => {
-    if (screen !== "xperience" && screen !== "xperience-space") return;
+    if (screen !== "xperience" && screen !== "xperience-space" && screen !== "detail") {
+      playableCheckKeyRef.current = "";
+      return;
+    }
     let cancelled = false;
-    setSpacePlayable(null);
+    // Background catalog refreshes re-check quietly; entering the screen, a connectivity change or a
+    // registration/prepared-state change is shown as CHECKING (a running Space may have prepared itself).
+    const checkKey = `${screen}|${offline}|${spaceRevision}`;
+    if (playableCheckKeyRef.current !== checkKey) {
+      playableCheckKeyRef.current = checkKey;
+      setSpacePlayable(null);
+    }
     void (async () => {
       const store = new IndexedDbBroadcastHydrationStore();
       const next: Record<string, boolean> = {};
@@ -1749,7 +1839,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
       if (!cancelled) setSpacePlayable(next);
     })();
     return () => { cancelled = true; };
-  }, [screen, spaceCandidates, offline]);
+  }, [screen, spaceCandidates, spaceRevision, offline]);
 
   const launchFromXperience = (app: DirectoryApplicationView, mode: ExperienceExecutionMode) => {
     const entry: XperienceEntry = mode === "APP" ? "APPS" : "SPACE";
@@ -1773,6 +1863,188 @@ export function ExperienceApp(props: ExperienceAppProps) {
     openLocalExperience({ ...app, experienced: true }, "PUBLIC", "SPACE");
   };
 
+  /* Space Installation V1 — home entries. Android lists and pins; OS Xperience decides what an entry resolves to. */
+  const homeEntries = useMemo(() => readSpaceHomeEntries(), [spaceRevision]);
+  const homeEntryStatus = (app: DirectoryApplicationView) => {
+    const eligibility = spaceHomeEntryEligibility({ id: app.id, entrypoint: app.xperienceUrl || app.productionUrl, executionModes: app.executionModes });
+    const recorded = homeEntries.some((entry) => entry.spaceId === app.id);
+    const pinned = pinnedShortcuts.includes(spaceShortcutId(app.id));
+    return { eligibility, recorded, pinned, state: spaceHomeEntryState({ supported: homeEntrySupported, eligible: eligibility.eligible, recorded, pinned }) };
+  };
+
+  const refreshHomeEntries = useCallback(async () => {
+    if (!homeEntryHost) return;
+    try {
+      const supported = await homeEntryHost.supported();
+      setHomeEntrySupported(supported);
+      if (!supported) return;
+      const pinned = await homeEntryHost.pinnedShortcutIds();
+      // An Android entry OS Xperience no longer records is disabled rather than left live.
+      const stale = staleSpaceShortcuts(pinned);
+      for (const id of stale) await homeEntryHost.disable(id).catch(() => undefined);
+      setPinnedShortcuts(pinned.filter((id) => !stale.includes(id)));
+      const pending = pendingPinRef.current;
+      if (pending && pinned.includes(spaceShortcutId(pending.spaceId))) {
+        pendingPinRef.current = null;
+        setHomeEntryNotice(`${pending.name} is on your Home Screen.`);
+      }
+    } catch {
+      setHomeEntrySupported(false);
+    }
+  }, [homeEntryHost]);
+
+  useEffect(() => {
+    if (!homeEntryHost) return;
+    void refreshHomeEntries();
+    // The launcher's pin confirmation is a separate window: re-read Android's pinned state when OS Xperience regains focus.
+    const onReturn = () => { if (document.visibilityState === "visible") void refreshHomeEntries(); };
+    window.addEventListener("focus", onReturn);
+    document.addEventListener("visibilitychange", onReturn);
+    const unsubscribe = homeEntryHost.onPinnedChange(() => {
+      void refreshHomeEntries();
+      window.setTimeout(() => void refreshHomeEntries(), 1000);
+    });
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", onReturn);
+      document.removeEventListener("visibilitychange", onReturn);
+    };
+  }, [homeEntryHost, refreshHomeEntries]);
+
+  useEffect(() => {
+    void navigator.storage?.persisted?.().then(setStoragePersisted).catch(() => setStoragePersisted(null));
+  }, []);
+
+  const addSpaceToHomeScreen = async (app: DirectoryApplicationView) => {
+    if (!homeEntryHost || !homeEntrySupported) return;
+    const eligibility = spaceHomeEntryEligibility({ id: app.id, entrypoint: app.xperienceUrl || app.productionUrl, executionModes: app.executionModes });
+    if (!eligibility.eligible) {
+      setHomeEntryNotice("This Space can't be added to the Home Screen until it is installed from a verified source.");
+      return;
+    }
+    const { presentation } = eligibility;
+    recordSpaceHomeEntry(presentation);
+    setSpaceRevision((value) => value + 1);
+    try {
+      const result = await homeEntryHost.requestPin(spaceShortcutRequest(presentation));
+      if (!result.requested) throw new Error("PIN_NOT_REQUESTED");
+      pendingPinRef.current = result.alreadyPinned ? null : { spaceId: presentation.spaceId, name: presentation.name };
+      setHomeEntryNotice(result.alreadyPinned ? `${presentation.name} is on your Home Screen.` : `Confirm on your Home Screen to add ${presentation.name}.`);
+    } catch {
+      removeSpaceHomeEntry(app.id);
+      setSpaceRevision((value) => value + 1);
+      setHomeEntryNotice(`${presentation.name} couldn't be added to the Home Screen.`);
+      return;
+    }
+    for (const delay of [1500, 5000, 12000]) window.setTimeout(() => void refreshHomeEntries(), delay);
+  };
+
+  const removeFromHomeScreen = async (app: DirectoryApplicationView, name: string) => {
+    removeSpaceHomeEntry(app.id);
+    setSpaceRevision((value) => value + 1);
+    // Android does not let an app unpin an icon; the entry is disabled so it can no longer open the Space.
+    await homeEntryHost?.disable(spaceShortcutId(app.id)).catch(() => undefined);
+    await refreshHomeEntries();
+    setHomeEntryNotice(`${name} was removed from the Home Screen. If your launcher still shows the icon, it is disabled and can be dragged away. Registration and offline data are unchanged.`);
+  };
+
+  const deleteOfflineData = async (target: { providerId: string; name: string; channelId: string }) => {
+    setDeleteOfflineTarget(null);
+    try {
+      await deletePreparedChannel(new IndexedDbBroadcastHydrationStore(), target.channelId);
+      setHomeEntryNotice(`${target.name} offline data was deleted. Prepare it again to run offline.`);
+    } catch {
+      setHomeEntryNotice(`${target.name} offline data couldn't be deleted.`);
+    } finally {
+      setSpaceRevision((value) => value + 1);
+    }
+  };
+
+  /** INSTALL SPACE: the build's signed artifact goes through the same verifier as a picked file. */
+  const installBundledSpace = async (providerId: string) => {
+    const path = bundledSpaceArtifact(providerId);
+    if (!path) return;
+    try {
+      const response = await fetch(new URL(path, document.baseURI));
+      if (!response.ok) throw new Error("ARTIFACT_UNAVAILABLE");
+      await importSpace(new Uint8Array(await response.arrayBuffer()));
+    } catch {
+      setSpaceImport({ code: "IMPORT_FAILED" });
+    }
+  };
+
+  /** Home entry → Space identity → SPACE, opened directly; anything else is shown honestly, never substituted. */
+  const openHomeEntrySpace = async (spaceId: string, context?: { apps?: DirectoryApplicationView[]; online?: boolean }) => {
+    const apps = context?.apps ?? [...memberships.map((item) => item.application), ...directory];
+    const online = context?.online ?? !offline;
+    const show = (view: SpaceLaunchView) => {
+      setSpaceLaunch(view);
+      navigate("space-launch", { replace: true });
+    };
+    const resolution = resolveInstalledSpace(spaceId, { apps, fixedMode: fixedExecutionMode });
+    if (resolution.kind === "INVALID_TARGET") return show({ status: "INVALID" });
+    if (resolution.kind === "NOT_INSTALLED") return show({ status: "NOT_INSTALLED", spaceId });
+    const name = findSpaceRegistration(spaceId)?.name ?? resolution.entry.label;
+    if (resolution.kind === "UNAVAILABLE") return show({ status: "UNAVAILABLE", spaceId, name });
+    const { app, target } = resolution;
+    const channelId = target.broadcastChannelId ?? null;
+    const playable = channelId ? await spaceLocallyPlayable(new IndexedDbBroadcastHydrationStore(), channelId) : false;
+    const { readiness } = classifySpaceReadiness({ released: true, offlineCapability: app.offlineCapability, channelId, locallyPlayable: playable, online });
+    if (readiness !== "READY_OFFLINE" && readiness !== "PREPARED") return show({ status: "NOT_READY", spaceId, name, readiness, channelId });
+    setSpaceLaunch(null);
+    autoplaySpaceRef.current = channelId ? app.id : null;
+    launchFromXperience(app, "SPACE");
+  };
+
+  /** Leaving the launch screen goes to OS Xperience Home and leaves no Experience running underneath. */
+  leaveSpaceLaunchRef.current = () => {
+    setSpaceLaunch(null);
+    if (activeIdRef.current) {
+      leaveXperienceMode();
+      setMountedFrames([]);
+      setOpened(null);
+      setLaunchingApp(null);
+      setActiveExperienceId(null);
+    }
+    setScreenStack([]);
+    setScreen("home");
+  };
+
+  processSpaceLaunchRef.current = async (raw, context) => {
+    const parsed = parseSpaceLaunch(raw);
+    if (!parsed.ok) {
+      setSpaceLaunch({ status: "INVALID" });
+      navigate("space-launch", { replace: true });
+      return;
+    }
+    await openHomeEntrySpace(parsed.spaceId, context);
+  };
+
+  // Warm start: the running process receives the launch and switches directly; no restart, no second runtime.
+  useEffect(() => {
+    if (!homeEntryHost) return;
+    return homeEntryHost.onLaunch(() => {
+      void homeEntryHost.takeLaunch().then((raw) => {
+        if (raw == null) return;
+        if (!localBootDoneRef.current) {
+          pendingSpaceLaunchRef.current = raw;
+          return;
+        }
+        setSpaceLaunch(openingSpaceLaunch(raw));
+        navigate("space-launch", { replace: true });
+        void processSpaceLaunchRef.current(raw);
+      }).catch(() => undefined);
+    });
+  }, [homeEntryHost, navigate]);
+
+  // A home-entry launch enters the running Space with its local broadcast on air.
+  useEffect(() => {
+    const id = autoplaySpaceRef.current;
+    if (!id || screen !== "experience" || executionMode !== "SPACE" || activeExperienceId !== id || !tvChannelId || tvState !== "idle") return;
+    autoplaySpaceRef.current = null;
+    void openTv();
+  }, [screen, executionMode, activeExperienceId, tvChannelId, tvState, openTv]);
+
   const restoreNoticeView = restoreNotice ? (
     <p className="ox-restore-notice" role="status" data-testid="restore-notice">
       {restoreNotice}{" "}
@@ -1782,6 +2054,67 @@ export function ExperienceApp(props: ExperienceAppProps) {
     </p>
   ) : null;
   const readySpaceCount = spaceEntries.filter((entry) => entry.readiness === "READY_OFFLINE" || entry.readiness === "PREPARED").length;
+  const homeEntryNoticeView = homeEntryNotice ? (
+    <p className="ox-restore-notice" role="status" data-testid="home-entry-notice">
+      {homeEntryNotice}{" "}
+      <button type="button" className="ox-text-link" onClick={() => setHomeEntryNotice(null)}>Dismiss</button>
+    </p>
+  ) : null;
+
+  const renderSpaceManage = (app: DirectoryApplicationView, name: string, channelId: string | null, readinessLabel: string, home: ReturnType<typeof homeEntryStatus>) => {
+    const registration = spaceRegistrations.find((item) => item.providerId === app.id) ?? null;
+    const presentation = home.eligibility.eligible ? home.eligibility.presentation : null;
+    return <div className="ox-space-manage" data-testid={`space-manage-${app.id}`}>
+      <dl>
+        <div><dt>Publisher</dt><dd>{registration?.publisherName ?? (presentation ? "OS Xperience signed catalog" : "Not verified")}</dd></div>
+        <div><dt>Verification</dt><dd data-testid={`space-verification-${app.id}`}>{registration ? "Verified publisher signature" : presentation ? "Verified signed catalog release" : "Not verified"}</dd></div>
+        <div><dt>Version</dt><dd>{registration?.version ?? presentation?.version ?? "—"}</dd></div>
+        <div><dt>Channel</dt><dd>{channelId ?? "—"}</dd></div>
+        <div><dt>Offline status</dt><dd>{readinessLabel}</dd></div>
+        <div><dt>Home Screen</dt><dd data-testid={`space-home-state-${app.id}`}>{HOME_ENTRY_LABEL[home.state]}</dd></div>
+        <div><dt>Offline storage</dt><dd>{storagePersisted ? "Persistent" : storagePersisted === false ? "Best effort — the system may clear it when storage is low" : "Unknown"}</dd></div>
+      </dl>
+      <div className="ox-space-manage-actions">
+        {home.recorded || home.pinned ? <button type="button" className="ox-button secondary compact" data-testid={`remove-home-${app.id}`} onClick={() => void removeFromHomeScreen(app, name)}>Remove from Home Screen</button> : null}
+        {channelId ? <button type="button" className="ox-button secondary compact" data-testid={`delete-offline-${app.id}`} onClick={() => setDeleteOfflineTarget({ providerId: app.id, name, channelId })}>Delete offline data</button> : null}
+      </div>
+      <p className="ox-space-manage-help">Remove from Home Screen removes only the icon. Remove registration removes only the verified registration. Delete offline data removes only the prepared media and schedule.</p>
+    </div>;
+  };
+
+  /** Directory → Space details: INSTALL SPACE → PREPARE FOR OFFLINE → ADD TO HOME SCREEN / ENTER. */
+  const renderSpaceInstall = (app: DirectoryApplicationView) => {
+    const artifact = bundledSpaceArtifact(app.id);
+    const registration = spaceRegistrations.find((item) => item.providerId === app.id) ?? null;
+    if (!artifact && !registration) return null;
+    const entry = spaceEntries.find((item) => item.app.id === app.id) ?? null;
+    const home = homeEntryStatus(app);
+    const name = registration?.name ?? app.name;
+    const preparing = preparingSpaceId === app.id;
+    const checking = !entry || entry.checking;
+    const ready = !checking && (entry!.readiness === "READY_OFFLINE" || entry!.readiness === "PREPARED");
+    const stage = spaceInstallationStage({ registered: Boolean(registration), readiness: checking ? "CHECKING" : entry!.readiness, preparing, homeEntry: home.state });
+    return <section className="ox-space-install" data-testid={`space-install-${app.id}`} data-stage={stage} data-home-entry={home.state}>
+      <small>SPACE</small>
+      <h2>{name}</h2>
+      <p>{registration?.description ?? "Your own digital environment, running on this installation."}</p>
+      {registration ? <ul className="ox-space-steps"><li>✓ Publisher verified</li><li>✓ Space registered</li></ul> : (
+        <button type="button" className="ox-button primary wide" data-testid={`install-space-${app.id}`} onClick={() => void installBundledSpace(app.id)}>Install Space</button>
+      )}
+      {spaceImport ? <p className="ox-restore-notice" role="status" data-testid="space-install-status" data-code={spaceImport.code}>{spaceImport.code === "REGISTERED" ? `${name} Space added.` : SPACE_IMPORT_MESSAGE[spaceImport.code]}</p> : null}
+      {registration && preparing ? <div className="ox-space-preparing" role="status" data-testid={`install-preparing-${app.id}`}><p>Preparing for offline use…</p><span className="ox-progress is-indeterminate" aria-hidden="true"><i /></span></div> : null}
+      {registration && !preparing && !checking && entry!.readiness === "NOT_PREPARED" && entry!.channelId ? (
+        <button type="button" className="ox-button primary wide" data-testid={`install-prepare-${app.id}`} disabled={preparingSpaceId !== null} onClick={() => void prepareSpace(app.id, entry!.channelId!)}>Prepare for offline</button>
+      ) : null}
+      {registration && !checking && entry!.readiness === "ONLINE_PREPARATION_REQUIRED" ? <p className="ox-empty-copy">Connect when available to prepare this Space.</p> : null}
+      {ready ? <p className="ox-space-ready" data-testid={`install-ready-${app.id}`}>{home.state === "INSTALLED" ? "Installed on this device." : "Ready offline."}</p> : null}
+      {ready && (home.state === "AVAILABLE" || home.state === "REQUESTED") ? <button type="button" className="ox-button primary wide" data-testid={`install-add-home-${app.id}`} onClick={() => void addSpaceToHomeScreen(app)}>Add to Home Screen</button> : null}
+      {registration && entry?.enterable ? <button type="button" className={`ox-button ${ready ? "secondary" : "primary"} wide`} data-testid={`install-enter-${app.id}`} onClick={() => launchFromXperience(app, "SPACE")}>{home.state === "INSTALLED" ? "Enter Space" : "Enter now"}</button> : null}
+      {registration ? <button type="button" className="ox-text-link" data-testid={`install-manage-${app.id}`} onClick={() => { setSpaceManageId(app.id); navigate("xperience-space"); }}>Manage</button> : null}
+      {prepareNotice ? <p className="ox-restore-notice" role="status">{prepareNotice}</p> : null}
+      {homeEntryNoticeView}
+    </section>;
+  };
   const appsEntry = xperienceEntry === "APPS";
   const switcherIsolation: ExperienceExecutionMode | null = xperienceEntry === "APPS" ? "APP" : xperienceEntry === "SPACE" ? executionMode : null;
 
@@ -1893,6 +2226,41 @@ export function ExperienceApp(props: ExperienceAppProps) {
         </section>
       </div> : null}
 
+      {screen === "space-launch" ? (() => {
+        const view = spaceLaunch ?? { status: "OPENING" as const };
+        const name = view.name ?? "Space";
+        const routeAvailable = !offline && Boolean(broadcastBaseFor(view.spaceId ?? null));
+        return <div data-testid="space-launch" className="ox-screen ox-space-launch" data-status={view.status} data-space-id={view.spaceId}>
+          {view.status === "OPENING" ? (
+            <section className="ox-launch-shell" aria-live="polite" aria-busy="true">
+              <span className="ox-app-glyph" aria-hidden="true">{initials(name)}</span>
+              <h1>{view.name ?? "Opening Space"}</h1>
+              <p>Opening…</p>
+            </section>
+          ) : (
+            <section className="ox-space-launch-card" role="status">
+              <span className="ox-app-glyph" aria-hidden="true">{initials(name)}</span>
+              <h1>{view.status === "INVALID" ? "This shortcut can't be opened" : view.status === "NOT_INSTALLED" ? "This Space isn't installed" : name}</h1>
+              {view.status === "NOT_READY" ? <>
+                <p data-testid="space-launch-message">{name} needs preparation before it can run on this device.</p>
+                <span className="ox-mode-badges"><em className="is-blocked">{SPACE_READINESS_LABEL[view.readiness ?? "NOT_PREPARED"]}</em></span>
+                {preparingSpaceId === view.spaceId ? <div className="ox-space-preparing" role="status"><p>Preparing for offline use…</p><span className="ox-progress is-indeterminate" aria-hidden="true"><i /></span></div> : null}
+                {routeAvailable && view.channelId ? (
+                  <button type="button" className="ox-button primary" data-testid="space-launch-prepare" disabled={preparingSpaceId !== null} onClick={() => void (async () => { await prepareSpace(view.spaceId!, view.channelId!); await openHomeEntrySpace(view.spaceId!); })()}>Prepare</button>
+                ) : (
+                  <p data-testid="space-launch-connect">{offline ? "Connect when available to prepare this Space." : "This device has no preparation route for this Space yet."}</p>
+                )}
+                {prepareNotice ? <p className="ox-restore-notice" role="status">{prepareNotice}</p> : null}
+              </> : null}
+              {view.status === "UNAVAILABLE" ? <p data-testid="space-launch-message">{name} isn&apos;t available as a Space on this device right now.</p> : null}
+              {view.status === "NOT_INSTALLED" ? <p data-testid="space-launch-message">Install it again from OS Xperience to use this Home Screen entry.</p> : null}
+              {view.status === "INVALID" ? <p data-testid="space-launch-message">The request didn&apos;t identify a Space installed on this device. Nothing was opened.</p> : null}
+              <button type="button" className="ox-button secondary" data-testid="space-launch-home" onClick={() => leaveSpaceLaunchRef.current()}>Open OS Xperience</button>
+            </section>
+          )}
+        </div>;
+      })() : null}
+
       {screen === "directory" ? <div data-testid="directory" className="ox-screen">
         <PageHeader title="Directory" />
         <form className="ox-search" onSubmit={searchApplications}><Icon name="search" /><input data-testid="search-input" value={searchText} onChange={(event) => setSearchText(event.target.value)} placeholder="Search applications" /><button>Search</button></form>
@@ -1955,18 +2323,31 @@ export function ExperienceApp(props: ExperienceAppProps) {
             </p>
           ) : null}
           {prepareNotice ? <p className="ox-restore-notice" role="status" data-testid="space-prepare-notice">{prepareNotice}</p> : null}
+          {homeEntryNoticeView}
         </div>
         {spaceEntries.length ? <div className="ox-xperience-list">{spaceEntries.map((entry) => {
           const registration = spaceRegistrations.find((item) => item.providerId === entry.app.id) ?? null;
+          const home = homeEntryStatus(entry.app);
+          const name = registration?.name ?? entry.app.name;
+          const ready = !entry.checking && (entry.readiness === "READY_OFFLINE" || entry.readiness === "PREPARED");
+          const readinessLabel = entry.checking ? "CHECKING" : SPACE_READINESS_LABEL[entry.readiness];
+          const stage = spaceInstallationStage({ registered: Boolean(registration), readiness: entry.checking ? "CHECKING" : entry.readiness, preparing: preparingSpaceId === entry.app.id, homeEntry: home.state });
+          const managing = spaceManageId === entry.app.id;
           return (
-          <article key={entry.app.id} className="ox-xperience-row" data-testid={`xperience-space-${entry.app.id}`} data-readiness={entry.checking ? "CHECKING" : entry.readiness} data-registered={registration ? "true" : "false"}>
+          <article key={entry.app.id} className="ox-xperience-row" data-testid={`xperience-space-${entry.app.id}`} data-readiness={entry.checking ? "CHECKING" : entry.readiness} data-registered={registration ? "true" : "false"} data-home-entry={home.state} data-stage={stage}>
             <AppGlyph app={registration ? { ...entry.app, name: registration.name } : entry.app} compact />
             <div>
               <small>{registration ? `${registration.publisherName} · v${registration.version}` : entry.app.category}</small>
-              <strong>{registration?.name ?? entry.app.name}</strong>
-              <span className="ox-mode-badges"><em className={entry.readiness === "READY_OFFLINE" || entry.readiness === "PREPARED" ? "is-ok" : entry.enterable ? "" : "is-blocked"}>{entry.checking ? "CHECKING" : SPACE_READINESS_LABEL[entry.readiness]}</em></span>
+              <strong>{name}</strong>
+              <span className="ox-mode-badges">
+                <em className={entry.readiness === "READY_OFFLINE" || entry.readiness === "PREPARED" ? "is-ok" : entry.enterable ? "" : "is-blocked"}>{readinessLabel}</em>
+                {home.state === "INSTALLED" ? <em className="is-ok" data-testid={`on-home-${entry.app.id}`}>ON HOME SCREEN</em> : null}
+              </span>
             </div>
             <div className="ox-xperience-row-actions">
+              {!registration && bundledSpaceArtifact(entry.app.id) ? (
+                <button type="button" className="ox-button compact" data-testid={`install-space-${entry.app.id}`} onClick={() => void installBundledSpace(entry.app.id)}>Install Space</button>
+              ) : null}
               {!entry.checking && entry.readiness === "NOT_PREPARED" && entry.channelId ? (
                 <button type="button" className="ox-button compact" data-testid={`prepare-space-${entry.app.id}`} disabled={preparingSpaceId !== null} onClick={() => void prepareSpace(entry.app.id, entry.channelId!)}>
                   {preparingSpaceId === entry.app.id ? "Preparing…" : "Prepare"}
@@ -1975,12 +2356,19 @@ export function ExperienceApp(props: ExperienceAppProps) {
               <button type="button" className="ox-button primary compact" data-testid={`enter-space-${entry.app.id}`} disabled={!entry.enterable || preparingSpaceId === entry.app.id} onClick={() => launchFromXperience(entry.app, "SPACE")}>
                 Enter Space
               </button>
+              {ready && (home.state === "AVAILABLE" || home.state === "REQUESTED") ? (
+                <button type="button" className="ox-button compact" data-testid={`add-home-${entry.app.id}`} onClick={() => void addSpaceToHomeScreen(entry.app)}>Add to Home Screen</button>
+              ) : null}
               {registration ? (
                 <button type="button" className="ox-text-link" data-testid={`remove-space-${entry.app.id}`} onClick={() => { removeSpaceRegistration(entry.app.id); setSpaceImport(null); setSpaceRevision((value) => value + 1); }}>
                   Remove registration
                 </button>
               ) : null}
+              <button type="button" className="ox-text-link" data-testid={`manage-space-${entry.app.id}`} aria-expanded={managing} onClick={() => setSpaceManageId(managing ? null : entry.app.id)}>
+                {managing ? "Close" : "Manage"}
+              </button>
             </div>
+            {managing ? renderSpaceManage(entry.app, name, entry.channelId, readinessLabel, home) : null}
           </article>
           );
         })}</div> : <div className="ox-inline-empty"><p>No Xperience Spaces are released on this installation.</p></div>}
@@ -2064,6 +2452,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
             ) : null}
           </div>
         </section>
+        {renderSpaceInstall(selected)}
       </div> : screen === "detail" ? <div className="ox-screen ox-detail"><BackButton /><div className="ox-inline-empty"><p>Select an application from Directory.</p></div></div> : null}
 
       {screen === "my-experience" ? <div data-testid="my-experience" className="ox-screen">
@@ -2361,9 +2750,20 @@ export function ExperienceApp(props: ExperienceAppProps) {
       ) : null}
     </main>
 
-    {!isDesktop && screen !== "experience" ? (
+    {!isDesktop && screen !== "experience" && screen !== "space-launch" ? (
       <BottomNav screen={screen} go={navigate} />
     ) : null}
+    {deleteOfflineTarget ? <div className="ox-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setDeleteOfflineTarget(null); }}>
+      <section data-testid="delete-offline-modal" className="ox-modal" role="dialog" aria-modal="true" aria-labelledby="delete-offline-title">
+        <span className="ox-modal-icon">◇</span>
+        <h2 id="delete-offline-title">Delete {deleteOfflineTarget.name} offline data?</h2>
+        <p>This deletes the media and schedule prepared for {deleteOfflineTarget.name} on this device. Nothing else changes (any registration or Home Screen icon stays), but it needs preparation, and a connection, before it can run offline again.</p>
+        <div>
+          <button type="button" className="ox-button secondary" onClick={() => setDeleteOfflineTarget(null)}>Cancel</button>
+          <button type="button" data-testid="confirm-delete-offline" className="ox-button danger" onClick={() => void deleteOfflineData(deleteOfflineTarget)}>Delete offline data</button>
+        </div>
+      </section>
+    </div> : null}
     {stopTarget ? <div className="ox-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setStopTarget(null); }}>
       <section data-testid="stop-modal" className="ox-modal" role="dialog" aria-modal="true" aria-labelledby="stop-title"><span className="ox-modal-icon">◇</span><h2 id="stop-title">Unxperience {stopTarget.application.name}?</h2><p>This removes it from My Xperience. You can add it again from Directory at any time.</p><div><button className="ox-button secondary" onClick={() => setStopTarget(null)}>Cancel</button><button data-testid="confirm-stop" className="ox-button danger" disabled={busyId === stopTarget.applicationId} onClick={() => void confirmStop()}>Unxperience</button></div></section>
     </div> : null}

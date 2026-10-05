@@ -27,6 +27,15 @@
 
         </activity>
 
+        <!-- Space home-screen entries. Not exported: reachable only through this package's pinned shortcuts. -->
+        <activity
+            android:name=".SpaceEntryActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity="com.digiconomy.osexperience.spaceentry"
+            android:theme="@android:style/Theme.NoDisplay" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
