@@ -20,6 +20,7 @@ import com.getcapacitor.BridgeActivity;
  * - Edge-to-edge + real WindowInsets → CSS --ox-safe-* (single inset source of truth)
  * - Two-finger horizontal swipe → ox-experience-escape → exitExperienceToHome()
  * - Space home-screen entries → SpaceHomeEntryPlugin (launcher integration only)
+ * - Space content delivered in the background → SpaceContentSyncPlugin / SpaceContentSyncWorker
  */
 public class MainActivity extends BridgeActivity {
   private static final String TAG = "OxHost";
@@ -41,6 +42,7 @@ public class MainActivity extends BridgeActivity {
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     registerPlugin(SpaceHomeEntryPlugin.class);
+    registerPlugin(SpaceContentSyncPlugin.class);
     super.onCreate(savedInstanceState);
     WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {

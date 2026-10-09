@@ -13,11 +13,16 @@ import { clearInvalidRestoreState, markBootPhase, type BootPhase } from "./boot.
  * Background update checks AFTER the shell is visible.
  * Never replaces bundled native runtime with a remote navigation.
  */
-export function UpdateGate({ children }: { children: ReactNode }) {
+/**
+ * `enabled=false` for a direct target launch: an installed App or Space never shows OS Xperience
+ * update prompts or reloads for an OS Xperience update. Updates apply when OS Xperience itself opens.
+ */
+export function UpdateGate({ children, enabled = true }: { children: ReactNode; enabled?: boolean }) {
   const [nativePrompt, setNativePrompt] = useState<OxUpdateDecision | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    if (!enabled) return;
     let cancelled = false;
     let checking = false;
     let initial = true;
@@ -54,7 +59,7 @@ export function UpdateGate({ children }: { children: ReactNode }) {
       window.clearTimeout(timer);
       window.removeEventListener("online", onOnline);
     };
-  }, []);
+  }, [enabled]);
 
   return (
     <>

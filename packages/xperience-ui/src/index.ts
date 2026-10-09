@@ -108,4 +108,26 @@ export {
 export type { XperienceBootResult, ShellAuthPosture, KvStore, LineupEntry, SwitchPlan } from "./local/index.js";
 export { SPACE_LAUNCH_ACTION, SPACE_LAUNCH_EXTRA } from "./local/index.js";
 export type { SpaceHomeEntryHost, SpaceShortcutRequest } from "./local/index.js";
+export { spaceLibraryRoute } from "./local/index.js";
+export type { BackgroundSyncedSpace, SpaceBackgroundSync, SpaceContentFetch, SpaceSyncPlanEntry } from "./local/index.js";
 export { ExperienceSwitcher, attachDoubleTap, classifyDoubleTap } from "./switcher/index.js";
+export {
+  APP_LAUNCH_ACTION,
+  APP_LAUNCH_EXTRA,
+  WEB_INSTALL_PARAM,
+  WEB_LAUNCH_PARAM,
+  browserWebInstallEnvironment,
+  createAndroidInstallationAdapter,
+  createIosInstallationAdapter,
+  createUnsupportedInstallationAdapter,
+  createWebInstallationAdapter,
+  resolveLaunchMode,
+  webLaunchFromUrl,
+} from "./installation/index.js";
+export type {
+  AppHomeEntryHost,
+  AppShortcutRequest,
+  InstallationPlatformAdapter,
+  LaunchMode,
+  WebInstallationAdapter,
+} from "./installation/index.js";

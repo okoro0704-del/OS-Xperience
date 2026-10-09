@@ -1,7 +1,9 @@
 import {
   hydrateAndPrepareSpaceTv,
+  spaceLibraryItems,
   type BroadcastHydrationSource,
   type BroadcastHydrationStore,
+  type SpaceLibraryStore,
 } from "@digiconomy/offline-kernel";
 import type {
   DirectoryApplicationView,
@@ -77,8 +79,9 @@ export function xperienceSpaceCandidates(apps: DirectoryApplicationView[]): Xper
 }
 
 /**
- * Truthful Space availability. READY OFFLINE means the Offline Kernel can play the provider's
- * channel from this installation right now; nothing is claimed from network reachability.
+ * Truthful Space availability. READY OFFLINE means the Offline Kernel can run the Space from this
+ * installation right now — its synced content, or its channel; nothing is claimed from network
+ * reachability. `locallyPlayable` is that local readiness (see spaceLocallyReady).
  */
 export function classifySpaceReadiness(input: {
   released: boolean;
@@ -119,4 +122,17 @@ export async function spaceLocallyPlayable(
   } catch {
     return false;
   }
+}
+
+/**
+ * Read-only: a Space is locally ready when this installation holds its published content, or can
+ * play its channel. A broadcast is one experience of a Space, never a precondition for it.
+ */
+export async function spaceLocallyReady(
+  stores: { broadcast: BroadcastHydrationStore; library: SpaceLibraryStore },
+  space: { spaceId: string; channelId: string | null },
+  now: Date = new Date(),
+): Promise<boolean> {
+  if ((await spaceLibraryItems(stores.library, space.spaceId)).length > 0) return true;
+  return space.channelId ? spaceLocallyPlayable(stores.broadcast, space.channelId, now) : false;
 }

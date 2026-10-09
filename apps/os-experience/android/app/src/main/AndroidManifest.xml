@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:allowBackup="false"
@@ -27,6 +28,18 @@
 
         </activity>
 
+        <!-- Direct target launch: each installed App or Space runs as its own task (one Recents card per target), never inside the OS Xperience task. Not exported. -->
+        <activity
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
+            android:name=".TargetActivity"
+            android:exported="false"
+            android:launchMode="standard"
+            android:documentLaunchMode="intoExisting"
+            android:autoRemoveFromRecents="false"
+            android:taskAffinity="com.digiconomy.osexperience.target"
+            android:theme="@style/AppTheme.DirectTargetLaunch"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Space home-screen entries. Not exported: reachable only through this package's pinned shortcuts. -->
         <activity
             android:name=".SpaceEntryActivity"
@@ -35,6 +48,14 @@
             android:noHistory="true"
             android:taskAffinity="com.digiconomy.osexperience.spaceentry"
             android:theme="@android:style/Theme.NoDisplay" />
+
+        <!-- Space content delivery: WorkManager's foreground service runs large downloads as a visible
+             "Syncing" notification (dataSync), so OEM battery managers do not freeze them. Not exported. -->
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false"
+            tools:node="merge" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -49,6 +70,9 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />

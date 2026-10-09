@@ -1,4 +1,15 @@
 const CACHE = "os-experience-shell-v3";
+/**
+ * Per-target install entries (manifest + monogram icons) written by OS Xperience Web when the person
+ * taps INSTALL. Served only from this cache, never from the network: an unknown target is a 404,
+ * so a crafted URL can never become an installable entry.
+ */
+const INSTALL_ENTRY_CACHE = "ox-install-entries-v1";
+const INSTALL_ENTRY_PREFIX = "/ox-install/";
+
+function isInstallEntryPath(pathname) {
+  return pathname.startsWith(INSTALL_ENTRY_PREFIX);
+}
 const PRECACHE = ["/", "/index.html", "/manifest.webmanifest", "/icons/icon.svg"];
 
 /** Paths that must never enter the public shell cache. */
@@ -31,7 +42,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== CACHE).map((key) => caches.delete(key))),
+      Promise.all(keys.filter((key) => key !== CACHE && key !== INSTALL_ENTRY_CACHE).map((key) => caches.delete(key))),
     ).then(() => self.clients.claim()),
   );
 });
@@ -42,6 +53,15 @@ self.addEventListener("fetch", (event) => {
   if (url.origin !== self.location.origin) return;
   // Never cache API / protected responses in the public shell cache.
   if (isPrivateOrApiPath(url.pathname)) return;
+
+  if (isInstallEntryPath(url.pathname)) {
+    event.respondWith(
+      caches.open(INSTALL_ENTRY_CACHE)
+        .then((cache) => cache.match(url.origin + url.pathname))
+        .then((entry) => entry || new Response("", { status: 404 })),
+    );
+    return;
+  }
 
   if (event.request.mode === "navigate") {
     event.respondWith(

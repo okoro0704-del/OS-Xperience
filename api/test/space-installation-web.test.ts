@@ -143,20 +143,20 @@ test("Space Installation V1 (browser): Directory → Install Space → verify �
     await page.getByTestId("space-install-status").waitFor();
     assert.equal(await page.getByTestId("space-install-status").getAttribute("data-code"), "INTEGRITY_FAILED");
     assert.equal(await card.getAttribute("data-stage"), "NOT_INSTALLED");
-    assert.equal(await page.getByTestId(`install-prepare-${providerId}`).count(), 0);
+    assert.equal(await page.getByTestId(`install-syncing-${providerId}`).count(), 0, "a refused Space syncs nothing");
     await page.unrouteAll();
 
     // The genuine artifact installs through the same verifier, from this installation's own bundle.
     await page.getByTestId(`install-space-${providerId}`).click();
     await page.waitForFunction(() => document.querySelector('[data-testid="space-install-status"]')?.getAttribute("data-code") === "REGISTERED");
     assert.ok(xperience.requests.includes(artifactPath), "the signed artifact comes from the bundle");
-    assert.deepEqual(producer.requests, [], "installing fetches nothing from the producer");
     assert.deepEqual(toApp(), [], "installing never probes the App");
     await page.waitForFunction((id) => document.querySelector(`[data-testid="space-install-${id}"]`)?.getAttribute("data-stage") === "REGISTERED", providerId);
     assert.match(await card.innerText(), /Publisher verified/);
     assert.match(await card.innerText(), /MrFundzMan/);
 
-    await page.getByTestId(`install-prepare-${providerId}`).click();
+    // No manual Prepare: the registered Space syncs its publisher's content by itself while connected.
+    assert.equal(await page.getByTestId(`install-prepare-${providerId}`).count(), 0);
     await page.waitForFunction((id) => document.querySelector(`[data-testid="space-install-${id}"]`)?.getAttribute("data-stage") === "READY_OFFLINE", providerId, { timeout: 60_000 });
     assert.ok(producer.requests.includes("/public/install/media"), "preparation acquires media");
     assert.equal(await page.getByTestId(`install-ready-${providerId}`).innerText(), "Ready offline.");

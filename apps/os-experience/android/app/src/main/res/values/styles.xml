@@ -19,4 +19,12 @@
     <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
         <item name="android:background">@drawable/splash</item>
     </style>
+
+    <!-- Direct target launch: an unbranded dark starting window. OS Xperience branding never precedes an installed target. -->
+    <style name="AppTheme.DirectTargetLaunch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">#05070f</item>
+        <item name="windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
 </resources>

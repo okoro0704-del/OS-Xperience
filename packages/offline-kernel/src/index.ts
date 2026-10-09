@@ -71,4 +71,5 @@ export function prepareAppTv(schedule: BroadcastSchedule, now: Date, online: boo
 }
 
 export * from "./hydration.js";
+export * from "./library.js";
 export * from "./browser.js";

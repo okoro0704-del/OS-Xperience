@@ -1084,3 +1084,41 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
     transition: none !important;
   }
 }
+
+/* ---- Installation: Directory INSTALL rows ------------------------------------------------------ */
+.ox-install-panel { display: grid; gap: 10px; margin-top: 14px; }
+.ox-install-row { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--ox-border); border-radius: var(--ox-radius-xl); background: var(--ox-bg-elevated); }
+.ox-install-row > div:nth-child(2) { display: grid; gap: 2px; min-width: 0; }
+.ox-install-row small { color: var(--ox-text-secondary); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.ox-install-row strong { overflow: hidden; font-family: "Outfit", sans-serif; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.ox-install-state { font-size: 11px; font-style: normal; }
+.ox-install-state.is-ok { color: var(--ox-success); }
+.ox-install-state.is-blocked { color: #f0a35b; }
+.ox-install-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.ox-install-row > .ox-restore-notice, .ox-install-note { grid-column: 1 / -1; margin: 0; }
+.ox-install-note { color: var(--ox-text-secondary); font-size: 12px; }
+@media (max-width: 420px) {
+  .ox-install-row { grid-template-columns: auto 1fr; }
+  .ox-install-actions { grid-column: 1 / -1; justify-content: stretch; }
+  .ox-install-actions .ox-button { flex: 1 1 0; }
+}
+
+/* ---- Direct target launch: the target is the only visible root ---------------------------------- */
+.ox-direct-root { display: block; min-height: 100vh; min-height: 100dvh; background: #05070f; }
+.ox-direct-main { padding: 0; }
+.ox-space-launch.is-direct { display: grid; min-height: 100vh; min-height: 100dvh; place-items: center; padding: calc(24px + var(--ox-safe-top)) 16px calc(24px + var(--ox-safe-bottom)); animation: none; }
+.ox-space-launch.is-direct .ox-launch-shell { background: transparent; }
+.ox-target-recovery { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 8px; }
+
+/* Space library: the Space's synced content, shown when it runs without its live software. */
+/* Clears the system bars (native insets, else env()) and the floating "Summon controls" chip. */
+.ox-space-library { position: absolute; inset: 0; z-index: 3; overflow-y: auto; padding: calc(var(--ox-safe-top, env(safe-area-inset-top, 0px)) + 64px) 16px calc(var(--ox-safe-bottom, env(safe-area-inset-bottom, 0px)) + 24px); background: #05070f; color: var(--ox-text); }
+.ox-space-library header h2 { margin: 0; font-size: 20px; }
+.ox-space-library header p { margin: 4px 0 14px; color: var(--ox-text-secondary); font-size: 12px; }
+.ox-space-library ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.ox-space-library li button { display: grid; width: 100%; min-height: 96px; gap: 4px; align-content: start; padding: 12px; color: inherit; text-align: left; border: 1px solid var(--ox-border); border-radius: 14px; background: rgba(17, 26, 44, .66); cursor: pointer; }
+.ox-space-library li strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.ox-space-library li small { display: -webkit-box; overflow: hidden; color: var(--ox-text-secondary); font-size: 11px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.ox-space-library-kind { color: var(--ox-text-secondary); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.ox-space-library-viewer { position: fixed; inset: 0; z-index: 4; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; padding: calc(var(--ox-safe-top, env(safe-area-inset-top, 0px)) + 64px) 16px calc(var(--ox-safe-bottom, env(safe-area-inset-bottom, 0px)) + 16px); background: #000; }
+.ox-space-library-viewer video, .ox-space-library-viewer img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }

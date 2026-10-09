@@ -112,6 +112,7 @@ export {
   classifySpaceReadiness,
   noRouteBroadcastSource,
   spaceLocallyPlayable,
+  spaceLocallyReady,
   xperienceAppEntries,
   xperienceSpaceCandidates,
   type SpaceReadiness,
@@ -119,6 +120,18 @@ export {
   type XperienceEntry,
   type XperienceSpaceCandidate,
 } from "./xperience-browsers.js";
+export {
+  SPACE_LIBRARY_MAX_ITEMS,
+  browserSpaceContentFetch,
+  createMybrandosLibrarySource,
+  libraryEntryFor,
+  spaceLibraryRoute,
+  type BackgroundSyncedSpace,
+  type SpaceBackgroundSync,
+  type SpaceContentFetch,
+  type SpaceLibraryRoute,
+  type SpaceSyncPlanEntry,
+} from "./space-library.js";
 export {
   SPACE_IMPORT_MESSAGE,
   SPACE_REGISTRY_KEY,

@@ -393,6 +393,10 @@ test("the native layer is launcher plumbing only and matches the web launch cont
   assert.match(manifest, /android:name="\.SpaceEntryActivity"\s+android:exported="false"/);
   assert.ok(plugin.includes(`"${SPACE_LAUNCH_ACTION}"`));
   assert.ok(plugin.includes(`"${SPACE_LAUNCH_EXTRA}"`));
-  assert.equal((plugin.match(/putExtra\(/g) ?? []).length, 1, "the shortcut intent carries one extra");
-  assert.doesNotMatch(plugin + trampoline, /setData\(|Uri\.parse|loadUrl|evaluateJavascript|Signature|MessageDigest|publicKey|INSTALL_PACKAGES/);
+  // App + Space Installation V1: one extra per entry kind — a Space intent carries only ox.space.id, an App intent only ox.app.id.
+  assert.deepEqual(plugin.match(/putExtra\([^)]*\)/g), ["putExtra(EXTRA_SPACE_ID, spaceId)", "putExtra(EXTRA_APP_ID, appId)"], "each shortcut intent carries one extra");
+  assert.doesNotMatch(plugin, /setData\(|Uri\.parse/, "shortcut intents carry no data URI");
+  // The trampoline's only data is the target task's identity (documentLaunchMode="intoExisting" keys tasks by it).
+  assert.deepEqual(trampoline.match(/setData\([^;]*;/g), ['setData(Uri.parse("ox-target:" + SpaceHomeEntryPlugin.taskIdentity(launch)));']);
+  assert.doesNotMatch(plugin + trampoline, /loadUrl|evaluateJavascript|Signature|MessageDigest|publicKey|INSTALL_PACKAGES/);
 });

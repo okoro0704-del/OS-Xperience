@@ -213,18 +213,17 @@ test("Space Launch File V1: import → verify → register → prepare → READY
     assert.equal(await page.getByTestId(`xperience-space-${providerId}`).count(), 0, "no Space before the launch file is imported");
     assert.deepEqual((await page.getByTestId("space-import-input").getAttribute("accept"))?.split(","), [".space", "application/vnd.digiconomy.space+json", "application/octet-stream"], "Android pickers type .space as octet-stream");
 
-    // Import: verified, registered, listed under Xperience Space — NOT PREPARED, not READY OFFLINE.
-    const producerBefore = online.toProducer().length;
+    // Import: verified, registered, listed under Xperience Space. Nobody prepares it by hand: while
+    // connected, the registered Space syncs its publisher's content by itself.
     assert.equal(await importLaunchFile(page), "REGISTERED");
-    assert.equal(online.toProducer().length, producerBefore, "registration fetches nothing");
     assert.deepEqual(online.toApp(), [], "import never probes the App");
     const row = page.getByTestId(`xperience-space-${providerId}`);
     assert.equal(await row.getAttribute("data-registered"), "true");
-    assert.equal(await readiness(page), "NOT_PREPARED", "registered ≠ prepared");
+    assert.equal(await page.getByTestId(`prepare-space-${providerId}`).count(), 0, "there is no manual Prepare");
     assert.match(await row.innerText(), /MrFundzMan/);
     assert.match(await row.innerText(), /mybrandOS · v1\.0\.0/i);
     assert.equal(await importLaunchFile(page), "ALREADY_INSTALLED", "re-import is deterministic");
-    console.log("SPACE_FILE_IMPORT", `bytes:${launchFileBytes}`, "status:REGISTERED", "readiness:NOT_PREPARED", "reimport:ALREADY_INSTALLED");
+    console.log("SPACE_FILE_IMPORT", `bytes:${launchFileBytes}`, "status:REGISTERED", "preparation:AUTOMATIC", "reimport:ALREADY_INSTALLED");
 
     // Import created no APP target: Xperience Apps still lists the one provider App.
     assert.equal(await hardwareBack(page), true);
@@ -235,9 +234,8 @@ test("Space Launch File V1: import → verify → register → prepare → READY
     assert.equal(await hardwareBack(page), true);
     await page.getByTestId("xperience-chooser").waitFor();
 
-    // Prepare: the Offline Kernel acquires real media; the Space becomes READY OFFLINE.
+    // Automatic preparation: the Offline Kernel acquires real media; the Space becomes READY OFFLINE.
     await page.getByTestId("xperience-choice-space").click();
-    await page.getByTestId(`prepare-space-${providerId}`).click();
     await page.waitForFunction((id) => document.querySelector(`[data-testid="xperience-space-${id}"]`)?.getAttribute("data-readiness") === "READY_OFFLINE", providerId, { timeout: 120_000 });
     assert.ok(producer.requests.includes(`/public/mrfundzman-tv/${media.label}/media`), "preparation acquires real media");
     assert.deepEqual(online.toApp(), [], "preparation never probes the App");

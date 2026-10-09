@@ -1,8 +1,9 @@
 import type { BroadcastHydrationSource, BroadcastRetentionStore, DownloadedMedia } from "./hydration.js";
 import type { BroadcastMedia, BroadcastSchedule } from "./index.js";
+import type { SpaceLibrary, SpaceLibraryStore } from "./library.js";
 
 const DB = "digiconomy-offline-kernel"; const STORE = "broadcast";
-type Row = { key: string; value: BroadcastSchedule | BroadcastMedia };
+type Row = { key: string; value: BroadcastSchedule | BroadcastMedia | SpaceLibrary | Uint8Array };
 function openDb(): Promise<IDBDatabase> { return new Promise((resolve, reject) => { const request = indexedDB.open(DB, 1); request.onupgradeneeded = () => request.result.createObjectStore(STORE, { keyPath: "key" }); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
 async function get(key: string) { const db = await openDb(); return new Promise<Row | undefined>((resolve, reject) => { const request = db.transaction(STORE).objectStore(STORE).get(key); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error); }); }
 async function put(row: Row) { const db = await openDb(); return new Promise<void>((resolve, reject) => { const request = db.transaction(STORE, "readwrite").objectStore(STORE).put(row); request.onsuccess = () => resolve(); request.onerror = () => reject(request.error); }); }
@@ -24,3 +25,13 @@ export function createHttpBroadcastSource(baseUrl: string): BroadcastHydrationSo
   return { async fetchSchedule(channelId) { const response = await fetch(`${base}/api/public/broadcast/${encodeURIComponent(channelId)}`); if (!response.ok) throw new Error("BROADCAST_UNAVAILABLE"); const projection = await response.json() as Projection; publisherId = projection.publisherId; for (const program of projection.programs) media.set(program.mediaId, program); return { channelId: projection.channelId, publisherId: projection.publisherId, scheduleId: projection.scheduleId, scheduleVersion: projection.scheduleVersion, programs: projection.programs.map(({ media: _media, ...program }) => program) }; }, async fetchMedia(mediaId) { const program = media.get(mediaId); if (!program) throw new Error("BROADCAST_MEDIA_UNKNOWN"); const response = await fetch(`${base}${program.media.path}`); if (!response.ok) throw new Error("BROADCAST_MEDIA_UNAVAILABLE"); const bytes = new Uint8Array(await response.arrayBuffer()); const checksum = program.media.checksum ?? ""; return { mediaId, publisherId, title: program.mediaId, durationMs: program.durationMs, version: program.media.version, contentType: program.media.contentType, byteLength: bytes.byteLength, checksum, availability: "REMOTE_ONLY", bytes, integrityVerified: Boolean(checksum) && await sha256(bytes) === checksum } satisfies DownloadedMedia; } };
 }
 export function localMediaBlob(media: BroadcastMedia & { bytes?: Uint8Array }) { return media.bytes ? new Blob([media.bytes.buffer.slice(media.bytes.byteOffset, media.bytes.byteOffset + media.bytes.byteLength) as ArrayBuffer], { type: media.contentType }) : undefined; }
+/** Space library rows live in the same kernel store: `library:<spaceId>` and `library-bytes:<itemId>`. */
+export class IndexedDbSpaceLibraryStore implements SpaceLibraryStore {
+  async loadLibrary(spaceId: string) { return (await get(`library:${spaceId}`))?.value as SpaceLibrary | undefined; }
+  async saveLibrary(library: SpaceLibrary) { await put({ key: `library:${library.spaceId}`, value: library }); }
+  async loadItemBytes(itemId: string) { return (await get(`library-bytes:${itemId}`))?.value as Uint8Array | undefined; }
+  async saveItemBytes(itemId: string, bytes: Uint8Array) { await put({ key: `library-bytes:${itemId}`, value: bytes }); }
+  async deleteLibrary(spaceId: string) { await remove(`library:${spaceId}`); }
+  async deleteItemBytes(itemId: string) { await remove(`library-bytes:${itemId}`); }
+}
+export function libraryItemBlob(bytes: Uint8Array, contentType: string) { return new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: contentType }); }
