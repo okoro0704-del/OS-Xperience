@@ -208,6 +208,11 @@ test("App + Space Installation (web): INSTALL from Directory, then each entry la
     await appPage.waitForSelector('[data-testid="in-app-experience"][data-execution-mode="APP"] iframe.is-active', { timeout: 30_000 });
     assert.equal(await appPage.locator("iframe.is-active").getAttribute("src"), `http://127.0.0.1:${bootstrap.port}/`);
     assert.equal(await appPage.getByTestId("direct-launch-root").getAttribute("data-launch-mode"), "DIRECT_APP");
+    // The App sits between the system bars: the Android host reports their heights as --ox-safe-*.
+    await appPage.evaluate(() => { const root = document.documentElement; root.style.setProperty("--ox-safe-top", "44px"); root.style.setProperty("--ox-safe-bottom", "48px"); });
+    const frame = await appPage.locator("iframe.is-active").evaluate((element) => { const box = element.getBoundingClientRect(); return { top: box.top, bottom: box.bottom, height: window.innerHeight }; });
+    assert.equal(frame.top, 44, "the App's header is below the status bar");
+    assert.equal(frame.bottom, frame.height - 48, "the App's bottom navigation is above the system navigation bar");
     assert.equal(await appPage.getByTestId("xperience-host-controls").count(), 0, "no OS Xperience controls over a directly launched App");
     assert.deepEqual(await shellSeen(appPage), [], "DIRECT_APP: OS Xperience Home/shell was never mounted");
     assert.equal(await appPage.evaluate(() => (window as Window & { __oxHardwareBack?: () => boolean }).__oxHardwareBack?.()), false);

@@ -340,16 +340,26 @@ a { color: inherit; }
 }
 .ox-switcher-edge.is-left { left: 0; }
 .ox-switcher-edge.is-right { right: 0; }
+/* A provider's page sits between the system bars (native insets on Android, env() on the web):
+   its own header and bottom navigation never run under the status bar or the gesture/nav bar. */
 .ox-immersive-frame.is-warm {
   position: absolute;
-  inset: 0;
+  top: var(--ox-safe-top);
+  left: var(--ox-safe-left);
+  /* An iframe is a replaced element: it does not stretch between insets, so its size is explicit. */
+  width: calc(100% - var(--ox-safe-left) - var(--ox-safe-right));
+  height: calc(100% - var(--ox-safe-top) - var(--ox-safe-bottom));
   opacity: 0;
   pointer-events: none;
   z-index: 0;
 }
 .ox-immersive-frame.is-active {
   position: absolute;
-  inset: 0;
+  top: var(--ox-safe-top);
+  left: var(--ox-safe-left);
+  /* An iframe is a replaced element: it does not stretch between insets, so its size is explicit. */
+  width: calc(100% - var(--ox-safe-left) - var(--ox-safe-right));
+  height: calc(100% - var(--ox-safe-top) - var(--ox-safe-bottom));
   z-index: 1;
 }
 .ox-immersive-frame.is-loading {
