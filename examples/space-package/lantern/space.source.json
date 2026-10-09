@@ -1,0 +1,28 @@
+{
+  "package": {
+    "id": "org.digiconomy.demo.lantern",
+    "version": "1.0.0",
+    "name": "Lantern Demo Space",
+    "description": "Synthetic SP1 demonstration Space: one offline gallery with an image and a chime."
+  },
+  "runtime": { "spaceContractVersion": 1, "minimumRuntimeVersion": "1.0.0" },
+  "space": {
+    "spaceId": "org.digiconomy.demo.lantern",
+    "defaultExperienceId": "gallery",
+    "experiences": [
+      {
+        "id": "gallery",
+        "title": "Lantern Gallery",
+        "type": "gallery",
+        "entry": { "type": "space.content-index/v1", "path": "content/index.json" },
+        "offlinePolicy": "cached",
+        "requires": ["content.read", "media.playback"]
+      }
+    ]
+  },
+  "offline": { "capabilities": ["space.gallery"], "contentIndex": "content/index.json" },
+  "permissions": ["content.read", "media.playback", "network.sync"],
+  "dependencies": [],
+  "license": { "spdx": "CC0-1.0", "duplication": "ALLOWED", "redistribution": true },
+  "provenance": { "createdAt": "2026-10-09T00:00:00.000Z", "tool": "space-package/1.0.0" }
+}
