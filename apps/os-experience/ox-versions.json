@@ -1,11 +1,11 @@
 {
-  "nativeVersion": "0.3.6",
-  "nativeBuildNumber": 14,
-  "runtimeVersion": "2026.09.30.1",
+  "nativeVersion": "0.3.7",
+  "nativeBuildNumber": 15,
+  "runtimeVersion": "2026.10.10.1",
   "minimumRuntimeVersion": "2026.09.01.0",
   "minimumNativeVersion": "0.3.0",
   "minimumNativeBuildNumber": 8,
   "apkUrl": "",
   "runtimeUrl": "https://xperience.getlifeos.app",
-  "notes": "Directory resolves live records to canonical providers; Space runs offline without the App origin; updates read the hosted manifest first"
+  "notes": "Creators sign in to their Studio with Trust ID from installed Apps and Spaces; first-party Apps can record with camera and microphone"
 }
