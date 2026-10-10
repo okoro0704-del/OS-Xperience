@@ -202,3 +202,4 @@ export {
   storeSignedCatalog,
   writePackageState,
 } from "./catalog.js";
+export { OPEN_EXTERNAL_MESSAGE, decideOpenExternal, type OpenExternalDecision } from "./open-external.js";

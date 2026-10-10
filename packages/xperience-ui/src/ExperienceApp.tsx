@@ -119,6 +119,7 @@ import {
   summarizeLaunch,
   type LaunchTrace,
 } from "./launch-metrics.js";
+import { decideOpenExternal } from "./local/open-external.js";
 import "./styles.css";
 import { lockFrameLineup, lockedExecutionMode, lockedProviderId, resolveHostMode, resolveLockedExperience, type LockedExperienceConfig, type SpacePresentation } from "./locked-xperience.js";
 import {
@@ -1432,6 +1433,31 @@ export function ExperienceApp(props: ExperienceAppProps) {
     },
     [openExternalUrl],
   );
+
+  // An App frame may ask OS Xperience to open one of its OWN https pages in the device browser
+  // (e.g. Trust ID sign-in, which cannot run inside the frame). See local/open-external.ts.
+  const lastOpenExternalAt = useRef(0);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const frames = Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe.ox-immersive-frame")).map((el) => ({
+        embedUrl: el.src,
+        window: el.contentWindow,
+      }));
+      const decision = decideOpenExternal({
+        data: event.data,
+        origin: event.origin,
+        source: event.source,
+        frames,
+        now: Date.now(),
+        lastAcceptedAt: lastOpenExternalAt.current,
+      });
+      if (!decision.ok) return;
+      lastOpenExternalAt.current = Date.now();
+      openHttps(decision.url);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [openHttps]);
 
   const refreshMemberships = useCallback(async () => {
     const [directoryResult, membershipResult] = await Promise.all([api.listDirectory(), api.listMyExperience()]);
