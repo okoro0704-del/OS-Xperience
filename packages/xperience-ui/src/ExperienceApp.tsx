@@ -120,6 +120,7 @@ import {
   type LaunchTrace,
 } from "./launch-metrics.js";
 import { decideOpenExternal } from "./local/open-external.js";
+import { OFFLINE_APP_READY_TIMEOUT_MS, appReadyFrame, frameSrc } from "./local/app-host.js";
 import { frameAllowPolicy } from "./local/frame-permissions.js";
 import "./styles.css";
 import { lockFrameLineup, lockedExecutionMode, lockedProviderId, resolveHostMode, resolveLockedExperience, type LockedExperienceConfig, type SpacePresentation } from "./locked-xperience.js";
@@ -530,6 +531,9 @@ export function ExperienceApp(props: ExperienceAppProps) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [stopTarget, setStopTarget] = useState<ExperienceMembershipView | null>(null);
   const [frameFailed, setFrameFailed] = useState(false);
+  /** The mounted frame whose App announced it booted (ox.appReady), and whether an offline Space gave up waiting. */
+  const [appReadyId, setAppReadyId] = useState<string | null>(null);
+  const [offlineAppMissing, setOfflineAppMissing] = useState(false);
   const [escapeHint, setEscapeHint] = useState(false);
   const [exitingExperience, setExitingExperience] = useState(false);
   const [airGrabbed, setAirGrabbed] = useState(false);
@@ -1459,6 +1463,32 @@ export function ExperienceApp(props: ExperienceAppProps) {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [openHttps]);
+
+  // A first-party App says when it has booted (online or from its offline cache). See local/app-host.ts.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const frames = Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe.ox-immersive-frame")).map((el) => ({
+        id: el.dataset.frameId ?? "",
+        embedUrl: el.src,
+        window: el.contentWindow,
+      }));
+      const id = appReadyFrame({ data: event.data, origin: event.origin, source: event.source, frames });
+      if (!id) return;
+      setAppReadyId(id);
+      if (id === activeIdRef.current) setFrameReady(true);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // Offline Space: the App gets a few seconds to boot from its own cache before the library is shown.
+  useEffect(() => {
+    setOfflineAppMissing(false);
+    if (!(executionMode === "SPACE" && offline) || !activeExperienceId || appReadyId === activeExperienceId) return;
+    const timer = window.setTimeout(() => setOfflineAppMissing(true), OFFLINE_APP_READY_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [executionMode, offline, activeExperienceId, appReadyId]);
+  const spaceAppDown = executionMode === "SPACE" && (frameFailed || (offline && offlineAppMissing));
 
   const refreshMemberships = useCallback(async () => {
     const [directoryResult, membershipResult] = await Promise.all([api.listDirectory(), api.listMyExperience()]);
@@ -2808,7 +2838,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); openSwitcher(); }}>Switch provider</button> : null}
                 {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); exitExperienceToHome(); }}>Leave Xperience</button> : null}
               </div> : null}
-            </> : <>
+            </> : direct ? null : <>
               <button type="button" className="ox-space-summon" onClick={() => setSpacePresentation("CONTROLS_VISIBLE")}>Summon controls</button>
               {spacePresentation !== "IMMERSIVE" ? <div className="ox-space-controls" data-testid="space-controls">
                 {tvChannelId ? <button type="button" onClick={() => void openTv()}>TV</button> : null}
@@ -2889,7 +2919,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 </>}
               </section>
             ) : null}
-            {(frameFailed || offline) && executionMode === "SPACE" && !experienceOfflineMessage && spaceLibrary?.items.length ? (
+            {spaceAppDown && !experienceOfflineMessage && spaceLibrary?.items.length ? (
               <section className="ox-space-library" data-testid="space-library" data-space-id={spaceLibrary.spaceId}>
                 <header><h2>{opened?.name ?? "This Space"}</h2><p>On this device</p></header>
                 <ul>
@@ -2914,7 +2944,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 ) : null}
               </section>
             ) : null}
-            {(frameFailed || offline) && executionMode === "SPACE" && !experienceOfflineMessage ? (
+            {spaceAppDown && !experienceOfflineMessage ? (
               <div className="ox-frame-note" role="status" data-testid="space-provider-unreachable">
                 {offline
                   ? "Offline. The live provider page needs a connection — this Space continues on this installation."
@@ -2935,8 +2965,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
                 </button>
               </section>
             ) : null}
-            {/* An offline Space never requests its provider's live page. */}
-            {!experienceOfflineMessage && !frameFailed && !(executionMode === "SPACE" && offline)
+            {/* Offline, a Space stays its App when the App boots from its own cache; otherwise the library. */}
+            {!experienceOfflineMessage && !frameFailed && !(executionMode === "SPACE" && offline && offlineAppMissing)
               ? mountedFrames.map((frame) => {
                   const active = frame.id === activeExperienceId;
                   return (
@@ -2944,7 +2974,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
                       key={frame.id}
                       className={`ox-immersive-frame${active && frameReady ? " is-ready" : " is-loading"}${active ? " is-active" : " is-warm"}`}
                       title={frame.name}
-                      src={frame.embedUrl}
+                      data-frame-id={frame.id}
+                      src={frameSrc(frame.embedUrl, executionMode)}
                       hidden={!active}
                       aria-hidden={!active}
                       sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
@@ -2960,7 +2991,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
                         if (!active) return;
                         if (executionMode === "SPACE") {
                           // Space readiness is local preparation; its provider's App URL is never probed.
-                          setFrameReady(true);
+                          // Offline, only the App's own ready signal shows it (never a WebView error page).
+                          if (!offline || appReadyId === frame.id) setFrameReady(true);
                           return;
                         }
                         void (async () => {
