@@ -1,0 +1,24 @@
+{
+  "format": "space.content-index/v1",
+  "title": "Lantern Gallery",
+  "items": [
+    {
+      "id": "lantern",
+      "title": "Lantern at dawn",
+      "asset": "content/media/lantern.png",
+      "kind": "image"
+    },
+    {
+      "id": "chime",
+      "title": "Evening chime",
+      "asset": "content/media/chime.wav",
+      "kind": "audio"
+    },
+    {
+      "id": "bells",
+      "title": "Morning bells",
+      "asset": "content/media/bells.wav",
+      "kind": "audio"
+    }
+  ]
+}

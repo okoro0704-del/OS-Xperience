@@ -6,6 +6,7 @@ import { importSpacePackage, listSpaces, openSpace, type RuntimeEnvironment } fr
 import { FileInstallationStore } from "./node-store.js";
 import { inspectSpacePackage, packSpace, verifySpacePackage, type PackDeclaration, type PackFile } from "./package.js";
 import type { PackageSigner } from "./crypto.js";
+import { runLifecycle } from "./cli-lifecycle.js";
 
 /**
  * space — portable Space packages (SP1).
@@ -21,6 +22,8 @@ import type { PackageSigner } from "./crypto.js";
  * Exit codes: 0 ok, 2 rejected by verification or policy, 1 usage error.
  */
 export const RUNTIME_VERSION = "1.0.0";
+/** Flags that take no value; every other --name consumes the next argument. */
+const FLAGS = new Set(["--online", "--launch-failed", "--no-rollback", "--requires-current-revocation"]);
 
 function option(args: string[], name: string): string | undefined {
   const at = args.indexOf(name);
@@ -98,8 +101,20 @@ export async function run(argv: string[]): Promise<unknown> {
       const opened = await openSpace(store, target!, { environment, experienceId: option(args, "--experience"), requested: options(args, "--request") });
       return { ...opened, runtime: { currentSpaceId: opened.runtime.currentSpaceId, currentExperienceId: opened.runtime.currentExperienceId, presentationState: opened.runtime.presentationState } };
     }
-    default:
-      throw new UsageError("commands: pack, inspect, verify, import, list, open");
+    default: {
+      // SP2 lifecycle commands: exact syntax in cli-lifecycle.ts.
+      if (command && ["install", "status", "launch", "state", "update", "keys"].includes(command)) {
+        const rest = argv.slice(1);
+        const positional = rest.filter((value, index) => !value.startsWith("--") && !(index > 0 && rest[index - 1]!.startsWith("--") && !FLAGS.has(rest[index - 1]!)));
+        return runLifecycle(command, positional, {
+          option: (name) => option(argv, name),
+          options: (name) => options(argv, name),
+          required: (name) => required(argv, name),
+          has: (name) => argv.includes(name),
+        }, option(argv, "--runtime") ?? RUNTIME_VERSION);
+      }
+      throw new UsageError("commands: pack, inspect, verify, import, list, open, install, status, launch, state, update, keys");
+    }
   }
 }
 

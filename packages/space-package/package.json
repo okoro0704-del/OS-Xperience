@@ -8,7 +8,8 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./node": { "types": "./dist/node-store.d.ts", "import": "./dist/node-store.js" }
+    "./node": { "types": "./dist/node-store.d.ts", "import": "./dist/node-store.js" },
+    "./node-backend": { "types": "./dist/node-backend.d.ts", "import": "./dist/node-backend.js" }
   },
   "scripts": {
     "build": "tsc",
