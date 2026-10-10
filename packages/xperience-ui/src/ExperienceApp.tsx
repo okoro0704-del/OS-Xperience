@@ -120,6 +120,7 @@ import {
   type LaunchTrace,
 } from "./launch-metrics.js";
 import { decideOpenExternal } from "./local/open-external.js";
+import { frameAllowPolicy } from "./local/frame-permissions.js";
 import "./styles.css";
 import { lockFrameLineup, lockedExecutionMode, lockedProviderId, resolveHostMode, resolveLockedExperience, type LockedExperienceConfig, type SpacePresentation } from "./locked-xperience.js";
 import {
@@ -2947,6 +2948,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
                       hidden={!active}
                       aria-hidden={!active}
                       sandbox="allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts"
+                      allow={frameAllowPolicy(frame.embedUrl)}
                       referrerPolicy="strict-origin-when-cross-origin"
                       onError={() => {
                         if (active) {

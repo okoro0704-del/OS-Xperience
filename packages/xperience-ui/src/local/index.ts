@@ -203,3 +203,4 @@ export {
   writePackageState,
 } from "./catalog.js";
 export { OPEN_EXTERNAL_MESSAGE, decideOpenExternal, type OpenExternalDecision } from "./open-external.js";
+export { frameAllowPolicy, isFirstPartyAppUrl } from "./frame-permissions.js";
