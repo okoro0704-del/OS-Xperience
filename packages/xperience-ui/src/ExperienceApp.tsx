@@ -2831,22 +2831,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
             data-switcher-open={switcherOpen ? "1" : "0"}
             className={`ox-in-app ox-immersive${exitingExperience ? " is-exiting" : ""}${airGrabbed ? " is-grabbed" : ""}${navProgress > 0.02 ? " is-nav-dragging" : ""}`}
           >
-            {executionMode === "APP" ? direct ? null : <>
-              <button type="button" className="ox-deliverable-trigger" aria-label="Xperience controls" data-testid="xperience-host-controls" aria-expanded={hostMenuOpen} onClick={() => setHostMenuOpen((open) => !open)}>☰</button>
-              {hostMenuOpen ? <div className="ox-deliverable-menu" role="menu" aria-label="Xperience controls">
-                {modeSwitchAllowed && activeSpaceTarget && !appsEntry ? <button type="button" role="menuitem" data-testid="switch-to-space" onClick={() => switchExecutionMode("SPACE")}>{EXECUTION_MODE_LABEL.SPACE}</button> : null}
-                {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); openSwitcher(); }}>Switch provider</button> : null}
-                {hostMode.kind === "GENERAL" ? <button type="button" role="menuitem" onClick={() => { setHostMenuOpen(false); exitExperienceToHome(); }}>Leave Xperience</button> : null}
-              </div> : null}
-            </> : direct ? null : <>
-              <button type="button" className="ox-space-summon" onClick={() => setSpacePresentation("CONTROLS_VISIBLE")}>Summon controls</button>
-              {spacePresentation !== "IMMERSIVE" ? <div className="ox-space-controls" data-testid="space-controls">
-                {tvChannelId ? <button type="button" onClick={() => void openTv()}>TV</button> : null}
-                {direct ? null : <button type="button" onClick={openSwitcher}>Space Switch</button>}
-                {direct ? null : <button type="button" onClick={revolveSpace}>Revolve</button>}
-                {modeSwitchAllowed && activeAppTarget && !direct ? <button type="button" data-testid="switch-to-app" onClick={() => switchExecutionMode("APP")}>Return to App</button> : null}
-              </div> : null}
-            </>}
+            {/* No shell chrome is drawn over an App or Space (no ☰, no Space controls chip, no TV tile):
+                the App owns its own UI. Shell actions stay reachable for keyboard / screen readers,
+                and the Switcher still opens from a double-tap on the edge. */}
+            {direct ? null : <div className="ox-sr-only" data-testid="xperience-host-controls">
+              {executionMode === "APP" && modeSwitchAllowed && activeSpaceTarget && !appsEntry ? <button type="button" data-testid="switch-to-space" onClick={() => switchExecutionMode("SPACE")}>{EXECUTION_MODE_LABEL.SPACE}</button> : null}
+              {executionMode === "SPACE" && modeSwitchAllowed && activeAppTarget ? <button type="button" data-testid="switch-to-app" onClick={() => switchExecutionMode("APP")}>Return to App</button> : null}
+              {executionMode === "SPACE" ? <button type="button" onClick={revolveSpace}>Revolve</button> : null}
+              {hostMode.kind === "GENERAL" ? <button type="button" onClick={exitExperienceToHome}>Leave Xperience</button> : null}
+            </div>}
             {spaceNotice ? <div className="ox-frame-note" role="status" data-testid="space-notice">{spaceNotice}</div> : null}
             {executionMode === "SPACE" && tvState !== "idle" ? <section className="ox-tv-surface" data-testid="space-tv" data-channel={tvChannelId ?? undefined}>
               {tvState === "preparing" ? <div role="status">Preparing broadcast...</div> : null}

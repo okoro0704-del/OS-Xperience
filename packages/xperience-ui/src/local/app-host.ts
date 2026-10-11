@@ -3,8 +3,8 @@ import { isFirstPartyAppUrl } from "./frame-permissions.js";
 /**
  * OS Xperience ↔ first-party App frame (mybrandOS on *.getlifeos.app).
  *
- * - The frame is told which deliverable it runs as: `?ox-mode=space` (installed Space) or
- *   `?ox-mode=app`. Other Apps' URLs are left untouched.
+ * - The frame is told which deliverable it runs as: `?ox-mode=space&entry=space` (installed
+ *   Space) or `?ox-mode=app`. Other Apps' URLs are left untouched.
  * - The App announces `{ type: "ox.appReady", version: 1 }` once it has booted — from the network
  *   or from its own offline cache. An offline Space stays the App when that arrives; only an App
  *   that never boots falls back to the prepared library.
@@ -17,6 +17,9 @@ export function frameSrc(embedUrl: string, executionMode: "APP" | "SPACE"): stri
   if (!isFirstPartyAppUrl(embedUrl)) return embedUrl;
   const url = new URL(embedUrl);
   url.searchParams.set("ox-mode", executionMode === "SPACE" ? "space" : "app");
+  // mybrandOS's own Space presentation (100% media, hidden UI) starts only from ?entry=space.
+  if (executionMode === "SPACE") url.searchParams.set("entry", "space");
+  else url.searchParams.delete("entry");
   return url.toString();
 }
 
