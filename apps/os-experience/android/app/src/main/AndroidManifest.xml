@@ -40,6 +40,24 @@
             android:theme="@style/AppTheme.DirectTargetLaunch"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Sign-in return from the device browser (osxperience://auth/return): brings the App / Space
+             that opened the browser back to the front. Exported (the browser starts it); shows nothing. -->
+        <activity
+            android:name=".AuthReturnActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:taskAffinity=""
+            android:launchMode="singleInstance"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="osxperience" android:host="auth" android:path="/return" />
+            </intent-filter>
+        </activity>
+
         <!-- Space home-screen entries. Not exported: reachable only through this package's pinned shortcuts. -->
         <activity
             android:name=".SpaceEntryActivity"

@@ -6,7 +6,7 @@
  * Shared layout contract: real system insets → --ox-safe-* (Web / Android / iOS).
  * Product behavior stays in @digiconomy/xperience-ui.
  */
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin, type PluginListenerHandle } from "@capacitor/core";
 import {
   SYSTEM_INSETS_EVENT,
   applySharedSystemInsets,
@@ -26,6 +26,29 @@ export function applySystemInsets(insets: SystemInsets): void {
     document.documentElement.dataset.oxInsets || "bridge";
 }
 
+/** Native sign-in return (Android): see AuthReturnPlugin.java. */
+const AuthReturn = registerPlugin<{
+  prepare(): Promise<void>;
+  addListener(event: "authReturn", cb: (data: { url: string }) => void): Promise<PluginListenerHandle>;
+}>("AuthReturn");
+
+/** Subscribe to osxperience://auth/return links handed back by the device browser. */
+export function subscribeAuthReturn(onReturn: (url: string) => void): () => void {
+  if (!Capacitor.isNativePlatform()) return () => undefined;
+  let handle: PluginListenerHandle | null = null;
+  let closed = false;
+  void AuthReturn.addListener("authReturn", (data) => onReturn(data.url))
+    .then((h) => {
+      if (closed) void h.remove();
+      else handle = h;
+    })
+    .catch(() => undefined);
+  return () => {
+    closed = true;
+    void handle?.remove();
+  };
+}
+
 export async function openExternalUrl(url: string): Promise<void> {
   if (!url || !/^https:\/\//i.test(url)) return;
   if (!Capacitor.isNativePlatform()) {
@@ -33,6 +56,8 @@ export async function openExternalUrl(url: string): Promise<void> {
     return;
   }
   try {
+    // Remember which App / Space opened the browser, so a sign-in return comes back to it.
+    await AuthReturn.prepare().catch(() => undefined);
     const { Browser } = await import("@capacitor/browser");
     await Browser.open({ url, presentationStyle: "popover" });
   } catch {

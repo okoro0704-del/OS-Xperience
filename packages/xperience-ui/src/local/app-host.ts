@@ -52,3 +52,29 @@ export function appReadyFrame(
     return null;
   }
 }
+
+/**
+ * A sign-in return link from the device browser: osxperience://auth/return?h=<hand-off>&a=<approval>&o=<App origin>.
+ * Only first-party https App origins are accepted; the contents are opaque and single-use, and the
+ * App frame on that origin only acts on a hand-off it started itself.
+ */
+export function parseAuthReturn(raw: string): { handoffId: string; approveSecret: string; origin: string } | null {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "osxperience:" || url.host !== "auth" || url.pathname !== "/return") return null;
+  const handoffId = url.searchParams.get("h") ?? "";
+  const approveSecret = url.searchParams.get("a") ?? "";
+  const origin = url.searchParams.get("o") ?? "";
+  if (!/^[A-Za-z0-9_-]{8,64}$/.test(handoffId) || !/^[A-Za-z0-9_-]{16,200}$/.test(approveSecret)) return null;
+  if (!isFirstPartyAppUrl(origin)) return null;
+  try {
+    if (new URL(origin).origin !== origin) return null;
+  } catch {
+    return null;
+  }
+  return { handoffId, approveSecret, origin };
+}

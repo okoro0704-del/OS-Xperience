@@ -41,3 +41,21 @@ test("installed first-party Spaces are prepared invisibly while online", async (
   assert.match(app, /className="ox-prepare-frame"/);
   assert.match(app, /prepareFrames\.filter\(\(frame\) => frame\.id !== activeExperienceId\)/);
 });
+
+test("browser sign-in returns are parsed strictly and only for first-party Apps", async () => {
+  const { parseAuthReturn } = await import("../src/local/app-host.ts");
+  const ok = "osxperience://auth/return?h=AbCdEfGh12345678&a=" + "x".repeat(43) + "&o=" + encodeURIComponent("https://mrfundzman.getlifeos.app");
+  assert.deepEqual(parseAuthReturn(ok), { handoffId: "AbCdEfGh12345678", approveSecret: "x".repeat(43), origin: "https://mrfundzman.getlifeos.app" });
+  for (const bad of [
+    ok.replace("osxperience://", "https://"),
+    ok.replace("/return", "/other"),
+    ok.replace(encodeURIComponent("https://mrfundzman.getlifeos.app"), encodeURIComponent("https://evil.example")),
+    ok.replace(encodeURIComponent("https://mrfundzman.getlifeos.app"), encodeURIComponent("https://mrfundzman.getlifeos.app/path")),
+    ok.replace("h=AbCdEfGh12345678", "h=<script>"),
+    ok.replace("a=" + "x".repeat(43), "a=short"),
+    "not a url",
+  ]) assert.equal(parseAuthReturn(bad), null, bad);
+  const app = readFileSync(new URL("../src/ExperienceApp.tsx", import.meta.url), "utf8");
+  assert.match(app, /if \(origin !== back\.origin\) continue;/);
+  assert.match(app, /postMessage\(\{ type: "ox\.authReturn", version: 1, handoffId: back\.handoffId, approveSecret: back\.approveSecret \}, origin\)/);
+});

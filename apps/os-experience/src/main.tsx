@@ -14,7 +14,7 @@ import {
   type InstallationPlatformAdapter,
   type SpaceContentFetch,
 } from "@digiconomy/xperience-ui";
-import { attachNativeShellBridge, openExternalUrl } from "./native-bridge.js";
+import { attachNativeShellBridge, openExternalUrl, subscribeAuthReturn } from "./native-bridge.js";
 import { BootWatchdog, ShellErrorBoundary, UpdateGate } from "./UpdateGate.js";
 import { markBootPhase } from "./boot.js";
 import { OX_NATIVE_VERSION, OX_RUNTIME_URL, OX_RUNTIME_VERSION } from "./ox-version-stamp.js";
@@ -139,6 +139,7 @@ function NativeShellApp({ initialLaunch }: { initialLaunch: unknown }) {
             runtimeVersion={OX_RUNTIME_VERSION}
             xperienceVersion={OX_NATIVE_VERSION}
             openExternalUrl={openExternalUrl}
+            subscribeAuthReturn={subscribeAuthReturn}
             spaceHomeEntryHost={spaceHomeEntryHost}
             installationAdapter={installationAdapter}
             initialSpaceLaunch={initialLaunch}

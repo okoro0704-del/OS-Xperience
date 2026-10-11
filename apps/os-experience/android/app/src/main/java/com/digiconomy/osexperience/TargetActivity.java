@@ -36,6 +36,8 @@ public class TargetActivity extends MainActivity {
   protected void onNewIntent(Intent intent) {
     super.onNewIntent(intent);
     if (!created) return;
+    // Coming back from browser sign-in: same target, same running App — never a re-launch.
+    if (intent != null && intent.getBooleanExtra(AuthReturnPlugin.EXTRA_AUTH_RETURN, false)) return;
     setIntent(intent);
     holdLaunch(intent);
     PluginHandle handle = getBridge() != null ? getBridge().getPlugin("SpaceHomeEntry") : null;

@@ -120,7 +120,7 @@ import {
   type LaunchTrace,
 } from "./launch-metrics.js";
 import { decideOpenExternal } from "./local/open-external.js";
-import { OFFLINE_APP_READY_TIMEOUT_MS, SPACE_PREPARE_TIMEOUT_MS, SPACE_SYNCED_MESSAGE, appReadyFrame, frameSrc, spacePrepareSrc } from "./local/app-host.js";
+import { OFFLINE_APP_READY_TIMEOUT_MS, SPACE_PREPARE_TIMEOUT_MS, SPACE_SYNCED_MESSAGE, appReadyFrame, frameSrc, parseAuthReturn, spacePrepareSrc } from "./local/app-host.js";
 import { frameAllowPolicy } from "./local/frame-permissions.js";
 import "./styles.css";
 import { lockFrameLineup, lockedExecutionMode, lockedProviderId, resolveHostMode, resolveLockedExperience, type LockedExperienceConfig, type SpacePresentation } from "./locked-xperience.js";
@@ -169,6 +169,8 @@ export interface ExperienceAppProps {
   onHardwareBackReady?: (handler: () => boolean) => void;
   /** Open HTTPS destinations outside the OS Xperience WebView (Custom Tabs / browser). */
   openExternalUrl?: (url: string) => void | Promise<void>;
+  /** Native sign-in return links (osxperience://auth/return) from the device browser. */
+  subscribeAuthReturn?: (onReturn: (url: string) => void) => () => void;
   /** Optional online/offline signal from the native shell. */
   online?: boolean | null;
   /** Host's generated runtime version stamp, recorded on the local installation. */
@@ -2123,6 +2125,26 @@ export function ExperienceApp(props: ExperienceAppProps) {
       style={{ position: "fixed", left: -4, top: -4, width: 1, height: 1, opacity: 0, pointerEvents: "none", border: 0 }}
     />
   ));
+
+  // Browser sign-in came back (Android): hand the one-time approval to the App frame on that origin.
+  // The App only accepts it for a sign-in it started itself (see local/app-host.ts).
+  useEffect(() => {
+    if (!props.subscribeAuthReturn) return;
+    return props.subscribeAuthReturn((url) => {
+      const back = parseAuthReturn(url);
+      if (!back) return;
+      for (const el of Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe.ox-immersive-frame"))) {
+        let origin = "";
+        try {
+          origin = new URL(el.src).origin;
+        } catch {
+          continue;
+        }
+        if (origin !== back.origin) continue;
+        el.contentWindow?.postMessage({ type: "ox.authReturn", version: 1, handoffId: back.handoffId, approveSecret: back.approveSecret }, origin);
+      }
+    });
+  }, [props.subscribeAuthReturn]);
 
   // The platform keeps these Spaces in sync while OS Xperience is closed: brand routes only.
   useEffect(() => {

@@ -43,6 +43,7 @@ public class MainActivity extends BridgeActivity {
   protected void onCreate(Bundle savedInstanceState) {
     registerPlugin(SpaceHomeEntryPlugin.class);
     registerPlugin(SpaceContentSyncPlugin.class);
+    registerPlugin(AuthReturnPlugin.class);
     super.onCreate(savedInstanceState);
     WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
