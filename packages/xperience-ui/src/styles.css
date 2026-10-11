@@ -1132,3 +1132,40 @@ button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid 
 .ox-space-library-kind { color: var(--ox-text-secondary); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .ox-space-library-viewer { position: fixed; inset: 0; z-index: 4; display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 12px; padding: calc(var(--ox-safe-top, env(safe-area-inset-top, 0px)) + 64px) 16px calc(var(--ox-safe-bottom, env(safe-area-inset-bottom, 0px)) + 16px); background: #000; }
 .ox-space-library-viewer video, .ox-space-library-viewer img { width: 100%; height: 100%; min-height: 0; object-fit: contain; }
+
+/* SP3 — portable Space installer (nine screens) and the declarative package renderer. */
+.ox-portable-spaces { display: grid; gap: 10px; margin: 18px 0; padding: 14px; border: 1px solid var(--ox-border); border-radius: 16px; background: rgba(17, 26, 44, .5); }
+.ox-portable-spaces header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ox-portable-spaces h2 { margin: 0; font-size: 15px; }
+.ox-portable-spaces ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.ox-space-installer { display: grid; gap: 14px; align-content: start; }
+.ox-installer-header { display: flex; align-items: center; gap: 12px; }
+.ox-installer-header small { color: var(--ox-text-secondary); font-size: 10px; letter-spacing: .08em; }
+.ox-installer-header h1 { margin: 2px 0 0; font-size: 22px; }
+.ox-dropzone { display: grid; gap: 10px; justify-items: center; padding: 22px 16px; text-align: center; border: 1px dashed var(--ox-border-strong); border-radius: 16px; color: var(--ox-text-secondary); }
+.ox-dropzone.is-over { border-color: #6aa3ff; background: rgba(60, 120, 255, .08); }
+.ox-checks { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ox-check { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 12px; border: 1px solid var(--ox-border); border-radius: 12px; }
+.ox-check p { grid-column: 1 / -1; margin: 0; color: var(--ox-text-secondary); font-size: 12px; line-height: 1.45; }
+.ox-check-label { font-weight: 600; font-size: 13px; }
+.ox-check-status { font-size: 11px; letter-spacing: .06em; }
+.ox-check.is-pass .ox-check-status { color: #4ade80; }
+.ox-check.is-fail .ox-check-status { color: #f87171; }
+.ox-check.is-warn .ox-check-status { color: #fbbf24; }
+.ox-check.is-not_evaluated .ox-check-status { color: var(--ox-text-secondary); }
+.ox-installed dl, [data-testid="inspect-file"] { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; margin: 0; font-size: 13px; }
+.ox-installed dt { color: var(--ox-text-secondary); }
+.ox-installed dd { margin: 0; overflow-wrap: anywhere; }
+.ox-local-state, .ox-update-check, .ox-history li { padding: 12px; border: 1px solid var(--ox-border); border-radius: 12px; }
+.ox-local-state ul, .ox-history { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.ox-history small { display: block; color: var(--ox-text-secondary); font-size: 11px; }
+.ox-trust-intake summary { cursor: pointer; color: var(--ox-text-secondary); font-size: 12px; }
+/* The renderer shows only verified media and text — never a frame — and clears the system bars. */
+.ox-package-renderer { position: fixed; inset: 0; z-index: 70; display: grid; grid-template-rows: auto 1fr auto; gap: 12px; overflow-y: auto; padding: calc(var(--ox-safe-top) + 16px) calc(var(--ox-safe-right) + 16px) calc(var(--ox-safe-bottom) + 16px) calc(var(--ox-safe-left) + 16px); background: #05070f; color: var(--ox-text); }
+.ox-package-renderer header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ox-package-renderer h2 { margin: 0; font-size: 20px; }
+.ox-package-renderer ul { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin: 0; padding: 0; list-style: none; }
+.ox-package-renderer li { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--ox-border); border-radius: 14px; background: rgba(17, 26, 44, .66); }
+.ox-package-renderer img, .ox-package-renderer video { width: 100%; max-height: 50vh; object-fit: contain; border-radius: 10px; background: #000; image-rendering: auto; }
+.ox-package-renderer audio { width: 100%; }
+.ox-package-renderer-note { margin: 0; color: var(--ox-text-secondary); font-size: 11px; }

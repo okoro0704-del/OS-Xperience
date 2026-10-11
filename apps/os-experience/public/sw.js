@@ -47,7 +47,45 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/*
+ * Web Share Target (SP3): a .space file shared to OS Xperience is kept in a one-slot IndexedDB inbox
+ * and the app is opened at /?ox-share=space, where it is taken once and identified by its contents.
+ * Nothing is trusted because of how it arrived.
+ */
+const SHARE_PATH = "/share-space";
+const SHARE_INBOX_DB = "digiconomy-space-inbox";
+const SHARE_MAX_BYTES = 256 * 1024 * 1024;
+
+function keepSharedFile(file) {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(SHARE_INBOX_DB, 1);
+    request.onupgradeneeded = () => request.result.createObjectStore("inbox");
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      const tx = db.transaction("inbox", "readwrite");
+      tx.objectStore("inbox").put({ name: file.name || "shared.space", file, at: Date.now() }, "shared");
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+  });
+}
+
 self.addEventListener("fetch", (event) => {
+  const shared = new URL(event.request.url);
+  if (event.request.method === "POST" && shared.origin === self.location.origin && shared.pathname === SHARE_PATH) {
+    event.respondWith((async () => {
+      try {
+        const form = await event.request.formData();
+        const file = form.get("space");
+        if (file && typeof file === "object" && file.size > 0 && file.size <= SHARE_MAX_BYTES) await keepSharedFile(file);
+      } catch {
+        /* the app then simply finds nothing to take */
+      }
+      return Response.redirect("/?ox-share=space", 303);
+    })());
+    return;
+  }
   if (event.request.method !== "GET") return;
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;

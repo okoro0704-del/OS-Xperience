@@ -183,7 +183,14 @@ export type PackageErrorCode =
   | "FORK_NOT_PERMITTED"
   | "TRANSACTION_NOT_FOUND"
   | "INVALID_TRANSITION"
-  | "DOWNLOAD_INTERRUPTED";
+  | "DOWNLOAD_INTERRUPTED"
+  // SP3 — browser runtime.
+  | "STORAGE_QUOTA_EXCEEDED"
+  | "STORAGE_UNAVAILABLE"
+  | "UNSUPPORTED_PLATFORM"
+  | "LIFECYCLE_BUSY"
+  | "UNSUPPORTED_FORMAT"
+  | "AMBIGUOUS_FORMAT";
 
 export class SpacePackageError extends Error {
   constructor(readonly code: PackageErrorCode, readonly detail?: string) {

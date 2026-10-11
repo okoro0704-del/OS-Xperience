@@ -12,3 +12,8 @@ export * from "./state.js";
 export * from "./backend.js";
 export * from "./lifecycle.js";
 export * from "./fork.js";
+// SP3 — browser runtime: IndexedDB backend, format detection, assessment, coordination.
+export * from "./browser-backend.js";
+export * from "./detect.js";
+export * from "./assessment.js";
+export * from "./browser-runtime.js";

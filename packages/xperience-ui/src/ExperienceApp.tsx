@@ -120,6 +120,9 @@ import {
   type LaunchTrace,
 } from "./launch-metrics.js";
 import "./styles.css";
+import { BrowserSpaceRuntime, LIMITS as SPACE_PACKAGE_LIMITS, SpacePackageError, detectSpaceFormat, type SpaceRecord } from "@digiconomy/space-package";
+import { SpaceInstaller, type InstallerRequest, type InstallerView } from "./space-installer/SpaceInstaller.js";
+import { takeSharedSpaceFile } from "./space-installer/share-intake.js";
 import { lockFrameLineup, lockedExecutionMode, lockedProviderId, resolveHostMode, resolveLockedExperience, type LockedExperienceConfig, type SpacePresentation } from "./locked-xperience.js";
 import {
   appInstallTarget,
@@ -246,6 +249,7 @@ type Screen =
   | "xperience"
   | "xperience-apps"
   | "xperience-space"
+  | "space-package"
   | "voice";
 type MembershipFilter = "All" | "Active" | "Paused" | "Recently Used";
 type Participant = { id: string; role: string; email?: string | null; displayName?: string | null };
@@ -508,6 +512,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
   // A home-entry tap opens straight into the target's launch surface: OS Xperience Home is never shown first.
   const [screen, setScreen] = useState<Screen>(() => (props.initialSpaceLaunch != null ? "space-launch" : "home"));
   const [screenStack, setScreenStack] = useState<Screen[]>([]);
+  // SP3 portable Space packages: one browser runtime over the SP2 lifecycle engine, created on first use.
+  const [spaceRuntime, setSpaceRuntime] = useState<BrowserSpaceRuntime | null>(null);
+  const [spaceRuntimeError, setSpaceRuntimeError] = useState<string | null>(null);
+  const [installerRequest, setInstallerRequest] = useState<InstallerRequest>({ view: "import", nonce: 0 });
+  const [installedPackages, setInstalledPackages] = useState<SpaceRecord[]>([]);
+  const [packageNotice, setPackageNotice] = useState<string | null>(null);
+  const installerBackRef = useRef<(() => boolean) | null>(null);
+  const [packageRendering, setPackageRendering] = useState(false);
+  const spaceRuntimeStarted = useRef(false);
   const [directory, setDirectory] = useState<DirectoryApplicationView[]>([]);
   const [featured, setFeatured] = useState<DirectoryApplicationView[]>([]);
   const [memberships, setMemberships] = useState<ExperienceMembershipView[]>([]);
@@ -1218,6 +1231,15 @@ export function ExperienceApp(props: ExperienceAppProps) {
       leaveSpaceLaunchRef.current();
       return true;
     }
+    if (current === "space-package") {
+      // The installer walks its own screens first, then returns to where it was opened from.
+      if (installerBackRef.current?.()) return true;
+      const stack = stackRef.current;
+      const previous = [...stack].reverse().find((item) => item !== current) ?? "xperience-space";
+      setScreenStack((items) => items.filter((item) => item !== current));
+      setScreen(previous);
+      return true;
+    }
     if (current === "detail") {
       setScreen(stackRef.current.includes("directory") ? "directory" : "home");
       setScreenStack((stack) => stack.filter((item) => item !== "detail"));
@@ -1282,7 +1304,8 @@ export function ExperienceApp(props: ExperienceAppProps) {
   }, [dismissSwitcher]);
 
   useEffect(() => {
-    window.__oxExperienceActive = screen === "experience";
+    // A portable Space rendered by the installer is an experience too: the native two-finger escape reaches it.
+    window.__oxExperienceActive = screen === "experience" || (screen === "space-package" && packageRendering);
     window.__oxExitExperienceToHome = exitExperienceToHome;
     (window as Window & { __oxNavLabsEnabled?: boolean; __oxNavLabsExperiment?: string | null }).__oxNavLabsEnabled =
       labsEnabled;
@@ -1293,7 +1316,7 @@ export function ExperienceApp(props: ExperienceAppProps) {
         delete window.__oxExitExperienceToHome;
       }
     };
-  }, [screen, exitExperienceToHome, labsEnabled, labsExperiment]);
+  }, [screen, packageRendering, exitExperienceToHome, labsEnabled, labsExperiment]);
 
   useEffect(() => {
     // OS Xperience's escape gesture has no meaning inside a directly launched target.
@@ -1927,17 +1950,83 @@ export function ExperienceApp(props: ExperienceAppProps) {
     const file = event.target.files?.[0];
     event.target.value = "";
     if (!file) return;
-    // The picker admits any octet-stream: refuse oversized picks before reading them into memory.
-    if (file.size > SPACE_LAUNCH_MAX_BYTES) {
+    await routeSpaceFile(file);
+  };
+
+  /**
+   * One import control for both `.space` formats, decided by content — never by the name:
+   * an SP1 portable package (ZIP) opens the installer; a Space Launch File (JSON) keeps its existing path.
+   */
+  const routeSpaceFile = async (file: File) => {
+    setPackageNotice(null);
+    // The picker admits any octet-stream: refuse picks larger than any Space format before reading them.
+    if (file.size > SPACE_PACKAGE_LIMITS.maxArchiveBytes) {
+      setSpaceImport({ code: "LAUNCH_FILE_TOO_LARGE" });
+      return;
+    }
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await file.arrayBuffer());
+    } catch {
+      setSpaceImport({ code: "IMPORT_FAILED" });
+      return;
+    }
+    let kind: "PACKAGE" | "LAUNCH_FILE" | null = null;
+    try {
+      kind = detectSpaceFormat(bytes);
+    } catch (error) {
+      if (error instanceof SpacePackageError && error.code === "AMBIGUOUS_FORMAT") {
+        setPackageNotice("This file could be read as more than one kind of Space file, so it was refused.");
+        return;
+      }
+    }
+    if (kind === "PACKAGE") {
+      openInstaller({ view: "inspect", file: { name: file.name, bytes } });
+      return;
+    }
+    if (bytes.length > SPACE_LAUNCH_MAX_BYTES) {
       setSpaceImport({ code: "LAUNCH_FILE_TOO_LARGE" });
       return;
     }
     try {
-      await importSpace(new Uint8Array(await file.arrayBuffer()));
+      await importSpace(bytes);
     } catch {
       setSpaceImport({ code: "IMPORT_FAILED" });
     }
   };
+
+  const ensureSpaceRuntime = useCallback(() => {
+    if (spaceRuntimeStarted.current) return;
+    spaceRuntimeStarted.current = true;
+    void BrowserSpaceRuntime.create()
+      .then((runtime) => setSpaceRuntime(runtime))
+      .catch((error: unknown) => setSpaceRuntimeError(error instanceof SpacePackageError ? `This browser cannot store Space packages (${error.detail ?? error.code}).` : "Space packages are unavailable in this browser."));
+  }, []);
+
+  const openInstaller = (request: { view: InstallerView; file?: { name: string; bytes: Uint8Array }; packageId?: string }) => {
+    ensureSpaceRuntime();
+    setInstallerRequest((current) => ({ ...request, nonce: current.nonce + 1 }));
+    navigate("space-package");
+  };
+
+  // Installed portable Spaces, listed in Xperience Space and My Xperience; refreshed when any tab changes them.
+  useEffect(() => {
+    if (screen !== "xperience-space" && screen !== "my-experience" && screen !== "space-package") return;
+    ensureSpaceRuntime();
+    if (!spaceRuntime) return;
+    let cancelled = false;
+    const load = () => void spaceRuntime.installations().then((records) => { if (!cancelled) setInstalledPackages(records); }).catch(() => undefined);
+    load();
+    const unsubscribe = spaceRuntime.onChange(load);
+    return () => { cancelled = true; unsubscribe(); };
+  }, [screen, spaceRuntime, ensureSpaceRuntime]);
+
+  // A .space file shared to OS Xperience (Web Share Target) opens the installer once.
+  useEffect(() => {
+    void takeSharedSpaceFile().then((shared) => {
+      if (shared) void routeSpaceFile(new File([shared.bytes.slice() as BlobPart], shared.name));
+    }).catch(() => undefined);
+  }, []);
 
   /** A Space's content route: its provider's own brand origin. No route is ever guessed. */
   const spaceLibrarySourceFor = (spaceId: string) => {
@@ -2617,6 +2706,26 @@ export function ExperienceApp(props: ExperienceAppProps) {
       navigate("detail");
     }} onPrimary={() => void (app.experienced ? openApplication(app, "PUBLIC") : startApplication(app))} />)}</div>;
 
+  const portableSpacesView = (
+    <section className="ox-portable-spaces" data-testid="portable-spaces">
+      <header>
+        <h2>Portable Spaces</h2>
+        <button type="button" className="ox-button compact" data-testid="open-installer" onClick={() => openInstaller({ view: "import" })}>Install from a file</button>
+      </header>
+      {installedPackages.length ? (
+        <ul>
+          {installedPackages.map((record) => (
+            <li key={record.packageId} data-testid={`portable-space-${record.packageId}`}>
+              <button type="button" className="ox-text-link" onClick={() => openInstaller({ view: "installed", packageId: record.packageId })}>
+                {record.active.manifest.package.name} <small>{record.active.version}{record.status === "RECOVERY_REQUIRED" ? " · needs recovery" : ""}</small>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : <p className="ox-empty-copy">Spaces you install from a .space file appear here. They carry no owner or authority.</p>}
+    </section>
+  );
+
   function PageHeader({ eyebrow, title, copy }: { eyebrow?: string; title: string; copy?: string }) {
     return <header className="ox-page-header">{eyebrow ? <small>{eyebrow}</small> : null}<h1>{title}</h1>{copy ? <p>{copy}</p> : null}</header>;
   }
@@ -3112,7 +3221,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
         <BackButton destination="xperience" />
         <PageHeader eyebrow="XPERIENCE SPACE" title="Xperience Space" copy="Offline-ready. Spaces run on this installation from what it has prepared." />
         {restoreNoticeView}
-        <div className="ox-space-import">
+        <div
+          className="ox-space-import"
+          data-testid="space-import-zone"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => { event.preventDefault(); const dropped = event.dataTransfer.files[0]; if (dropped) void routeSpaceFile(dropped); }}
+        >
           <input ref={spaceFileRef} type="file" accept={SPACE_IMPORT_ACCEPT} hidden data-testid="space-import-input" onChange={(event) => void onSpaceFileChosen(event)} />
           <button type="button" className="ox-button compact" data-testid="import-space" onClick={() => spaceFileRef.current?.click()}>Import Space</button>
           {spaceImport ? (
@@ -3122,8 +3236,10 @@ export function ExperienceApp(props: ExperienceAppProps) {
             </p>
           ) : null}
           {prepareNotice ? <p className="ox-restore-notice" role="status" data-testid="space-prepare-notice">{prepareNotice}</p> : null}
+          {packageNotice ? <p className="ox-restore-notice" role="alert" data-testid="space-package-notice">{packageNotice}</p> : null}
           {homeEntryNoticeView}
         </div>
+        {portableSpacesView}
         {spaceEntries.length ? <div className="ox-xperience-list">{spaceEntries.map((entry) => {
           const registration = spaceRegistrations.find((item) => item.providerId === entry.app.id) ?? null;
           const home = homeEntryStatus(entry.app);
@@ -3255,8 +3371,23 @@ export function ExperienceApp(props: ExperienceAppProps) {
         {renderSpaceInstall(selected)}
       </div> : screen === "detail" ? <div className="ox-screen ox-detail"><BackButton /><div className="ox-inline-empty"><p>Select an application from Directory.</p></div></div> : null}
 
+      {screen === "space-package" ? (
+        <SpaceInstaller
+          key={installerRequest.nonce}
+          runtime={spaceRuntime}
+          runtimeError={spaceRuntimeError}
+          request={installerRequest}
+          online={!offline}
+          onClose={() => { installerBackRef.current = null; navigate("xperience-space"); }}
+          onLaunchFile={(bytes) => { navigate("xperience-space"); void importSpace(bytes).catch(() => setSpaceImport({ code: "IMPORT_FAILED" })); }}
+          onEscapeHome={() => navigate("home")}
+          registerBack={(handler) => { installerBackRef.current = handler; }}
+          onRenderingChange={setPackageRendering}
+        />
+      ) : null}
       {screen === "my-experience" ? <div data-testid="my-experience" className="ox-screen">
         <PageHeader title="My Xperience" copy="Manage your lineup. Enter Xperience to switch like channels." />
+        {portableSpacesView}
         {filteredMemberships.length || lineup.length ? (
           <button
             type="button"

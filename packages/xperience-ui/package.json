@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@digiconomy/offline-kernel": "*",
+    "@digiconomy/space-package": "*",
     "@digiconomy/xperience-contract": "*",
     "@digiconomy/xperience-sdk": "*",
     "@mediapipe/tasks-vision": "^0.10.18",

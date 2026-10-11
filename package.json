@@ -15,7 +15,7 @@
     "dev:xperience-mobile": "npm run dev -w @digiconomy/xperience-mobile",
     "dev:demo": "npm run dev -w @osshell/demo-notes",
     "build": "npm run build -w @osshell/contract && npm run build -w @osshell/runtime && npm run build -w @osshell/sdk && npm run build -w @osshell/web",
-    "build:os-experience": "node scripts/write-ox-update-manifest.mjs && npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && npm run build -w @digiconomy/os-experience",
+    "build:os-experience": "node scripts/write-ox-update-manifest.mjs && npm run build -w @digiconomy/xperience-contract && npm run build -w @digiconomy/xperience-sdk && npm run build -w @digiconomy/offline-kernel && npm run build -w @digiconomy/space-resolution && npm run build -w @digiconomy/space-runtime && npm run build -w @digiconomy/space-capability-bridge && npm run build -w @digiconomy/space-package && npm run build -w @digiconomy/os-experience",
     "typecheck": "npm run build -w @osshell/contract && npm run typecheck -w @osshell/contract && npm run typecheck -w @osshell/runtime && npm run typecheck -w @osshell/sdk && npm run typecheck -w @osshell/web && npm run typecheck -w @osshell/demo-notes",
     "test": "npm run build -w @osshell/contract && npm run build -w @osshell/runtime && npm run build -w @osshell/sdk && node --import tsx --test packages/contract/test/*.test.ts packages/runtime/test/*.test.ts",
     "android:sync": "npm run build -w @osshell/web && npx cap sync android",

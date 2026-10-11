@@ -1,8 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { cspPlugin } from "./csp";
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), cspPlugin()],
   // Relative asset URLs are required for Capacitor bundled WebView origins.
   base: "./",
   server: { port: 5176 },
