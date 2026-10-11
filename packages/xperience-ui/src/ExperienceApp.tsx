@@ -120,7 +120,7 @@ import {
   type LaunchTrace,
 } from "./launch-metrics.js";
 import { decideOpenExternal } from "./local/open-external.js";
-import { OFFLINE_APP_READY_TIMEOUT_MS, appReadyFrame, frameSrc } from "./local/app-host.js";
+import { OFFLINE_APP_READY_TIMEOUT_MS, SPACE_PREPARE_TIMEOUT_MS, SPACE_SYNCED_MESSAGE, appReadyFrame, frameSrc, spacePrepareSrc } from "./local/app-host.js";
 import { frameAllowPolicy } from "./local/frame-permissions.js";
 import "./styles.css";
 import { lockFrameLineup, lockedExecutionMode, lockedProviderId, resolveHostMode, resolveLockedExperience, type LockedExperienceConfig, type SpacePresentation } from "./locked-xperience.js";
@@ -2072,6 +2072,58 @@ export function ExperienceApp(props: ExperienceAppProps) {
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [offline, registeredSpaceKey]);
 
+  // Installed Spaces stay ready offline: while connected, each first-party Space App is loaded
+  // invisibly so it refreshes its own offline copy (app shell + all of the creator's media, TV and
+  // Radio). People never have to open the Space online first; the creator's new posts arrive the
+  // next time the phone is connected.
+  const [prepareFrames, setPrepareFrames] = useState<{ id: string; src: string }[]>([]);
+  const preparedAtRef = useRef(new Map<string, number>());
+  useEffect(() => {
+    if (offline || !registeredSpaceKey) return;
+    const due: { id: string; src: string }[] = [];
+    for (const space of readSpaceRegistrations()) {
+      if (Date.now() - (preparedAtRef.current.get(space.providerId) ?? 0) < SPACE_AUTO_SYNC_INTERVAL_MS) continue;
+      const app = directory.find((item) => item.id === space.providerId);
+      const src = app ? spacePrepareSrc(app.xperienceUrl || app.productionUrl) : null;
+      if (!src) continue;
+      preparedAtRef.current.set(space.providerId, Date.now());
+      due.push({ id: space.providerId, src });
+    }
+    if (!due.length) return;
+    setPrepareFrames((current) => [...current.filter((frame) => !due.some((next) => next.id === frame.id)), ...due]);
+    const timer = window.setTimeout(() => {
+      setPrepareFrames((current) => current.filter((frame) => !due.some((next) => next.id === frame.id)));
+    }, SPACE_PREPARE_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [offline, registeredSpaceKey, directory]);
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const frames = Array.from(document.querySelectorAll<HTMLIFrameElement>("iframe.ox-prepare-frame")).map((el) => ({
+        id: el.dataset.frameId ?? "",
+        embedUrl: el.src,
+        window: el.contentWindow,
+      }));
+      const id = appReadyFrame({ data: event.data, origin: event.origin, source: event.source, frames }, SPACE_SYNCED_MESSAGE);
+      if (id) setPrepareFrames((current) => current.filter((frame) => frame.id !== id));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+  // The Space on screen refreshes itself; only Spaces not being shown are prepared invisibly.
+  const prepareView = offline ? null : prepareFrames.filter((frame) => frame.id !== activeExperienceId).map((frame) => (
+    <iframe
+      key={`prepare-${frame.id}`}
+      className="ox-prepare-frame"
+      data-frame-id={frame.id}
+      title=""
+      aria-hidden="true"
+      tabIndex={-1}
+      src={frame.src}
+      sandbox="allow-same-origin allow-scripts"
+      style={{ position: "fixed", left: -4, top: -4, width: 1, height: 1, opacity: 0, pointerEvents: "none", border: 0 }}
+    />
+  ));
+
   // The platform keeps these Spaces in sync while OS Xperience is closed: brand routes only.
   useEffect(() => {
     const host = props.spaceBackgroundSync;
@@ -3037,10 +3089,12 @@ export function ExperienceApp(props: ExperienceAppProps) {
       <main className="ox-main ox-direct-main">
         {screen === "experience" && experienceView ? experienceView : targetLaunchView}
       </main>
+      {prepareView}
     </div>;
   }
 
   return <div className="ox-root" data-testid="os-experience">
+    {prepareView}
     {isDesktop ? <aside className="ox-sidebar">
       <Brand />
       <nav className="ox-side-nav" aria-label="Primary navigation">

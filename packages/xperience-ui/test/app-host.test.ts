@@ -26,3 +26,18 @@ test("the installed Space has no shell controls and stays the App offline", () =
   assert.match(app, /!\(executionMode === "SPACE" && offline && offlineAppMissing\)/);
   assert.match(app, /src=\{frameSrc\(frame\.embedUrl, executionMode\)\}/);
 });
+
+test("installed first-party Spaces are prepared invisibly while online", async () => {
+  const { spacePrepareSrc, SPACE_SYNCED_MESSAGE } = await import("../src/local/app-host.ts");
+  assert.equal(spacePrepareSrc("https://mrfundzman.getlifeos.app/"), "https://mrfundzman.getlifeos.app/?ox-mode=space&entry=space&ox-prepare=1");
+  assert.equal(spacePrepareSrc("https://shop.example/"), null);
+  const win = {};
+  const frames = [{ id: "mybrandos", embedUrl: "https://mrfundzman.getlifeos.app/?ox-prepare=1", window: win }];
+  const msg = { data: { type: SPACE_SYNCED_MESSAGE, version: 1 }, origin: "https://mrfundzman.getlifeos.app", source: win, frames };
+  assert.equal(appReadyFrame(msg, SPACE_SYNCED_MESSAGE), "mybrandos");
+  assert.equal(appReadyFrame(msg), null, "a synced report is not an app-ready signal");
+  const app = readFileSync(new URL("../src/ExperienceApp.tsx", import.meta.url), "utf8");
+  assert.match(app, /if \(offline \|\| !registeredSpaceKey\) return;\n    const due/);
+  assert.match(app, /className="ox-prepare-frame"/);
+  assert.match(app, /prepareFrames\.filter\(\(frame\) => frame\.id !== activeExperienceId\)/);
+});
